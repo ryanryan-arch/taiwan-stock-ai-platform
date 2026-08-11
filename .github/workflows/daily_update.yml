@@ -1,0 +1,72 @@
+name: Daily stock data update
+
+on:
+  schedule:
+    # UTC 14:35 = UTC+8 22:35
+    # 週一至週五執行
+    - cron: "35 14 * * 1-5"
+
+  # 允許從 GitHub Actions 頁面手動測試
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-stock-update
+  cancel-in-progress: false
+
+jobs:
+  update-stock-ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run daily stock update
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          python scripts/update_daily.py
+
+      - name: Validate generated files
+        run: |
+          test -f results/latest_rankings.csv
+          test -f results/latest_features.parquet
+          test -f results/industry_rankings.csv
+          test -f results/update_status.json
+
+          python -c "import pandas as pd; df=pd.read_csv('results/latest_rankings.csv', dtype={'StockID': str}); assert df['StockID'].nunique() == 85, f'Expected 85 stocks, got {df.StockID.nunique()}'"
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/raw_price
+          git add data/raw_institution
+          git add data/merged
+          git add results/latest_rankings.csv
+          git add results/latest_features.parquet
+          git add results/industry_rankings.csv
+          git add results/update_status.json
+
+          if git diff --cached --quiet; then
+            echo "No new market data to commit."
+          else
+            git commit -m "Auto update daily stock ranking"
+            git push
+          fi
