@@ -1,0 +1,26 @@
+# Python 虛擬環境
+.venv/
+
+# Python 快取
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code 設定
+.vscode/
+
+# Streamlit 敏感資料
+.streamlit/secrets.toml
+
+# API Token 與環境變數
+.env
+*.env
+
+# 作業系統檔案
+.DS_Store
+Thumbs.db
+
+# 暫存與紀錄檔
+*.log
+*.tmp

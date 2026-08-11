@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+plotly
+pyarrow
+joblib
+scikit-learn
+xgboost
+yfinance
+ta
+requests
