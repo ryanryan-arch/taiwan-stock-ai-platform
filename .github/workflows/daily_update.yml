@@ -1,19 +1,20 @@
-name: Daily stock data update
+name: Daily stock data and SHAP update
 
 on:
   schedule:
-    # UTC 14:35 = UTC+8 22:35
-    # 週一至週五執行
+    # GitHub Actions 使用 UTC 時間
+    # UTC 14:35 = 台灣時間 22:35
+    # 每週一至週五執行
     - cron: "35 14 * * 1-5"
 
-  # 允許從 GitHub Actions 頁面手動測試
+  # 允許從 GitHub Actions 頁面手動執行
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: daily-stock-update
+  group: daily-stock-and-shap-update
   cancel-in-progress: false
 
 jobs:
@@ -22,8 +23,18 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # ============================================
+      # 1. 下載 GitHub Repository
+      # ============================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ============================================
+      # 2. 設定 Python 3.11
+      # ============================================
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -31,10 +42,28 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      # ============================================
+      # 3. 安裝 Python 套件
+      # ============================================
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+
+      # ============================================
+      # 4. 檢查 FinMind Token
+      # ============================================
+
+      - name: Check FinMind token
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          python -c "import os; assert os.getenv('FINMIND_TOKEN'), 'FINMIND_TOKEN is not configured'; print('FINMIND_TOKEN is configured')"
+
+      # ============================================
+      # 5. 更新股價、法人、特徵與 AI 排行榜
+      # ============================================
 
       - name: Run daily stock update
         env:
@@ -42,14 +71,407 @@ jobs:
         run: |
           python scripts/update_daily.py
 
+      # ============================================
+      # 6. 計算最新 85 檔 SHAP 模型解釋
+      # ============================================
+
+      - name: Calculate latest SHAP explanations
+        run: |
+          python scripts/calculate_shap.py
+
+      # ============================================
+      # 7. 檢查 Python 程式語法
+      # ============================================
+
+      - name: Check Python syntax
+        run: |
+          python -m compileall scripts pages
+
+      # ============================================
+      # 8. 確認必要輸出檔案存在
+      # ============================================
+
       - name: Validate generated files
         run: |
           test -f results/latest_rankings.csv
           test -f results/latest_features.parquet
           test -f results/industry_rankings.csv
           test -f results/update_status.json
+          test -f results/latest_shap_values.parquet
+          test -f results/global_shap_importance.csv
+          test -f results/shap_status.json
 
-          python -c "import pandas as pd; df=pd.read_csv('results/latest_rankings.csv', dtype={'StockID': str}); assert df['StockID'].nunique() == 85, f'Expected 85 stocks, got {df.StockID.nunique()}'"
+      # ============================================
+      # 9. 驗證排行榜、族群與 SHAP 資料完整性
+      # ============================================
+
+      - name: Validate ranking and SHAP data
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+
+          result_dir = Path("results")
+
+          ranking_path = (
+              result_dir
+              / "latest_rankings.csv"
+          )
+
+          feature_path = (
+              result_dir
+              / "latest_features.parquet"
+          )
+
+          industry_path = (
+              result_dir
+              / "industry_rankings.csv"
+          )
+
+          update_status_path = (
+              result_dir
+              / "update_status.json"
+          )
+
+          shap_path = (
+              result_dir
+              / "latest_shap_values.parquet"
+          )
+
+          global_shap_path = (
+              result_dir
+              / "global_shap_importance.csv"
+          )
+
+          shap_status_path = (
+              result_dir
+              / "shap_status.json"
+          )
+
+
+          # ----------------------------------------
+          # 檢查 AI 排行榜
+          # ----------------------------------------
+
+          ranking_df = pd.read_csv(
+              ranking_path,
+              dtype={"StockID": str},
+          )
+
+          ranking_df["StockID"] = (
+              ranking_df["StockID"]
+              .astype(str)
+              .str.zfill(4)
+          )
+
+          ranking_stock_count = (
+              ranking_df["StockID"]
+              .nunique()
+          )
+
+          assert ranking_stock_count == 85, (
+              "Expected 85 ranking stocks, "
+              f"got {ranking_stock_count}"
+          )
+
+          assert len(ranking_df) == 85, (
+              "Expected 85 ranking rows, "
+              f"got {len(ranking_df)}"
+          )
+
+          assert ranking_df["Rank"].min() == 1, (
+              "Ranking must start from 1"
+          )
+
+          assert ranking_df["Rank"].max() == 85, (
+              "Ranking must end at 85"
+          )
+
+          assert not ranking_df[
+              "AI_Score"
+          ].isna().any(), (
+              "AI_Score contains missing values"
+          )
+
+
+          # ----------------------------------------
+          # 檢查最新特徵
+          # ----------------------------------------
+
+          feature_df = pd.read_parquet(
+              feature_path
+          )
+
+          feature_df["StockID"] = (
+              feature_df["StockID"]
+              .astype(str)
+              .str.zfill(4)
+          )
+
+          feature_stock_count = (
+              feature_df["StockID"]
+              .nunique()
+          )
+
+          assert feature_stock_count == 85, (
+              "Expected 85 feature stocks, "
+              f"got {feature_stock_count}"
+          )
+
+
+          # ----------------------------------------
+          # 檢查族群排行榜
+          # ----------------------------------------
+
+          industry_df = pd.read_csv(
+              industry_path
+          )
+
+          industry_count = (
+              industry_df["Industry"]
+              .nunique()
+          )
+
+          assert industry_count == 17, (
+              "Expected 17 industries, "
+              f"got {industry_count}"
+          )
+
+
+          # ----------------------------------------
+          # 檢查每日更新狀態
+          # ----------------------------------------
+
+          with open(
+              update_status_path,
+              "r",
+              encoding="utf-8",
+          ) as file:
+              update_status = json.load(file)
+
+          assert (
+              update_status.get("status")
+              == "success"
+          ), (
+              "Daily update status is not success"
+          )
+
+          assert (
+              update_status.get("stock_count")
+              == 85
+          ), (
+              "Daily update stock count "
+              "is not 85"
+          )
+
+
+          # ----------------------------------------
+          # 檢查 SHAP 個股解釋
+          # ----------------------------------------
+
+          shap_df = pd.read_parquet(
+              shap_path
+          )
+
+          shap_df["StockID"] = (
+              shap_df["StockID"]
+              .astype(str)
+              .str.zfill(4)
+          )
+
+          required_shap_columns = {
+              "StockID",
+              "Feature",
+              "Feature_Value",
+              "SHAP_Value",
+              "Abs_SHAP_Value",
+              "Impact_Direction",
+          }
+
+          missing_shap_columns = (
+              required_shap_columns
+              - set(shap_df.columns)
+          )
+
+          assert not missing_shap_columns, (
+              "SHAP data is missing columns: "
+              f"{sorted(missing_shap_columns)}"
+          )
+
+          shap_stock_count = (
+              shap_df["StockID"]
+              .nunique()
+          )
+
+          shap_feature_count = (
+              shap_df["Feature"]
+              .nunique()
+          )
+
+          expected_shap_rows = 85 * 32
+
+          assert shap_stock_count == 85, (
+              "Expected 85 SHAP stocks, "
+              f"got {shap_stock_count}"
+          )
+
+          assert shap_feature_count == 32, (
+              "Expected 32 SHAP features, "
+              f"got {shap_feature_count}"
+          )
+
+          assert len(shap_df) == expected_shap_rows, (
+              f"Expected {expected_shap_rows} "
+              "SHAP rows, "
+              f"got {len(shap_df)}"
+          )
+
+          assert not shap_df[
+              "SHAP_Value"
+          ].isna().any(), (
+              "SHAP_Value contains missing values"
+          )
+
+          assert not shap_df[
+              "Feature_Value"
+          ].isna().any(), (
+              "Feature_Value contains "
+              "missing values"
+          )
+
+
+          # ----------------------------------------
+          # 檢查全域 SHAP 重要性
+          # ----------------------------------------
+
+          global_shap_df = pd.read_csv(
+              global_shap_path
+          )
+
+          required_global_columns = {
+              "Feature",
+              "Mean_Abs_SHAP",
+              "Mean_SHAP",
+              "Positive_Count",
+              "Negative_Count",
+              "Importance_Rank",
+              "Importance_Percent",
+          }
+
+          missing_global_columns = (
+              required_global_columns
+              - set(global_shap_df.columns)
+          )
+
+          assert not missing_global_columns, (
+              "Global SHAP data is missing "
+              "columns: "
+              f"{sorted(missing_global_columns)}"
+          )
+
+          assert len(global_shap_df) == 32, (
+              "Expected 32 global SHAP rows, "
+              f"got {len(global_shap_df)}"
+          )
+
+          assert (
+              global_shap_df[
+                  "Importance_Rank"
+              ].min()
+              == 1
+          ), (
+              "Global SHAP ranking "
+              "must start from 1"
+          )
+
+          assert (
+              global_shap_df[
+                  "Importance_Rank"
+              ].max()
+              == 32
+          ), (
+              "Global SHAP ranking "
+              "must end at 32"
+          )
+
+
+          # ----------------------------------------
+          # 檢查 SHAP 狀態
+          # ----------------------------------------
+
+          with open(
+              shap_status_path,
+              "r",
+              encoding="utf-8",
+          ) as file:
+              shap_status = json.load(file)
+
+          assert (
+              shap_status.get("status")
+              == "success"
+          ), (
+              "SHAP status is not success"
+          )
+
+          assert (
+              shap_status.get("stock_count")
+              == 85
+          ), (
+              "SHAP stock count is not 85"
+          )
+
+          assert (
+              shap_status.get("feature_count")
+              == 32
+          ), (
+              "SHAP feature count is not 32"
+          )
+
+          assert (
+              shap_status.get("shap_row_count")
+              == expected_shap_rows
+          ), (
+              "SHAP row count is incorrect"
+          )
+
+
+          print(
+              "All ranking, feature, industry "
+              "and SHAP validation checks passed."
+          )
+
+          print(
+              "Ranking stocks:",
+              ranking_stock_count,
+          )
+
+          print(
+              "Industries:",
+              industry_count,
+          )
+
+          print(
+              "SHAP stocks:",
+              shap_stock_count,
+          )
+
+          print(
+              "SHAP features:",
+              shap_feature_count,
+          )
+
+          print(
+              "SHAP rows:",
+              len(shap_df),
+          )
+          PY
+
+      # ============================================
+      # 10. 提交更新資料至 GitHub
+      # ============================================
 
       - name: Commit updated data
         run: |
@@ -59,14 +481,19 @@ jobs:
           git add data/raw_price
           git add data/raw_institution
           git add data/merged
+
           git add results/latest_rankings.csv
           git add results/latest_features.parquet
           git add results/industry_rankings.csv
           git add results/update_status.json
 
+          git add results/latest_shap_values.parquet
+          git add results/global_shap_importance.csv
+          git add results/shap_status.json
+
           if git diff --cached --quiet; then
-            echo "No new market data to commit."
+            echo "No new stock or SHAP data to commit."
           else
-            git commit -m "Auto update daily stock ranking"
+            git commit -m "Auto update stock ranking and SHAP explanations"
             git push
           fi
