@@ -78,7 +78,7 @@ jobs:
       - name: Calculate latest SHAP explanations
         run: |
           python scripts/calculate_shap.py
-    - name: Update AI Top 10 live performance
+      - name: Update AI Top 10 live performance
         run: python scripts/update_top10_performance.py
     
 
