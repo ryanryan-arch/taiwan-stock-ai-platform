@@ -446,9 +446,40 @@ else:
     )
 
 
-updated_at = update_status.get(
+updated_at_raw = update_status.get(
     "updated_at",
     "尚無紀錄",
+)
+
+
+def format_taiwan_update_time(value):
+    """
+    將 GitHub Actions 儲存的 UTC 執行時間轉為台灣時間。
+    """
+
+    if value in [None, "", "尚無紀錄"]:
+        return "尚無紀錄"
+
+    parsed_time = pd.to_datetime(
+        value,
+        errors="coerce",
+        utc=True,
+    )
+
+    if pd.isna(parsed_time):
+        return str(value)
+
+    taiwan_time = parsed_time.tz_convert(
+        "Asia/Taipei"
+    )
+
+    return taiwan_time.strftime(
+        "%Y-%m-%d %H:%M:%S 台灣時間"
+    )
+
+
+updated_at = format_taiwan_update_time(
+    updated_at_raw
 )
 
 price_data_date = update_status.get(
