@@ -891,8 +891,10 @@ def merge_price_and_institution(
     """
     合併股價與法人資料。
 
-    為避免將尚未發布的法人資料解讀成 0，
-    合併資料只保留到該股票最新法人資料日期。
+    保留完整股價交易日期，並以日期與股票代碼
+    左合併法人買賣超資料。當日沒有法人紀錄時，
+    法人買賣超欄位填入 0，確保所有股票可使用
+    相同的最新交易日期建立 AI 排行榜。
     """
 
     if (
@@ -938,23 +940,8 @@ def merge_price_and_institution(
         .str.zfill(4)
     )
 
-    latest_institution_date = (
-        institution_data["date"].max()
-    )
-
-    # 不使用晚於最新法人資料日期的股價
-    aligned_price_df = price_data[
-        price_data["date"]
-        <= latest_institution_date
-    ].copy()
-
-    if aligned_price_df.empty:
-        raise ValueError(
-            "依法人日期對齊後，股價資料為空。"
-        )
-
     merged_df = pd.merge(
-        aligned_price_df,
+        price_data,
         institution_data,
         on=[
             "date",
@@ -971,7 +958,7 @@ def merge_price_and_institution(
         "Institutional_Total_NetBuy",
     ]
 
-    # 在法人已公布範圍內，無紀錄視為當日 0
+    # 當日沒有法人買賣超紀錄時，視為買賣超 0
     merged_df[institution_columns] = (
         merged_df[institution_columns]
         .fillna(0.0)
