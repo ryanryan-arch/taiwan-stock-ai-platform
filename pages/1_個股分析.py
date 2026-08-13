@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -12,19 +13,41 @@ import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(
+        0,
+        str(PROJECT_ROOT),
+    )
+
+
+from utils.ui import (  # noqa: E402
+    load_global_css,
+    render_footer,
+    render_sidebar_info,
+)
+
+
 RESULT_DIR = PROJECT_ROOT / "results"
-RAW_PRICE_DIR = PROJECT_ROOT / "data" / "raw_price"
+
+RAW_PRICE_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "raw_price"
+)
 
 RANKING_PATH = (
-    RESULT_DIR / "latest_rankings.csv"
+    RESULT_DIR
+    / "latest_rankings.csv"
 )
 
 LATEST_FEATURE_PATH = (
-    RESULT_DIR / "latest_features.parquet"
+    RESULT_DIR
+    / "latest_features.parquet"
 )
 
 SHAP_PATH = (
-    RESULT_DIR / "latest_shap_values.parquet"
+    RESULT_DIR
+    / "latest_shap_values.parquet"
 )
 
 
@@ -38,6 +61,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+load_global_css()
+render_sidebar_info()
 
 
 # ==================================================
@@ -146,6 +173,23 @@ def load_rankings():
             errors="coerce",
         )
 
+    numeric_columns = [
+        "Rank",
+        "Close",
+        "AI_Score",
+        "Predicted_Probability",
+        "RSI",
+        "Volume_Ratio",
+        "ATR_Ratio",
+    ]
+
+    for column in numeric_columns:
+        if column in dataframe.columns:
+            dataframe[column] = pd.to_numeric(
+                dataframe[column],
+                errors="coerce",
+            )
+
     return dataframe
 
 
@@ -236,7 +280,7 @@ def load_shap_values():
 @st.cache_data(ttl=300)
 def load_price_history(stock_id):
     """
-    載入指定股票的歷史股價。
+    載入指定股票歷史股價。
     """
 
     possible_paths = [
@@ -304,7 +348,7 @@ def load_price_history(stock_id):
 
 
 # ==================================================
-# 顯示格式函式
+# 格式化函式
 # ==================================================
 
 def safe_number(
@@ -327,7 +371,10 @@ def safe_number(
     try:
         return number_format.format(value)
 
-    except (TypeError, ValueError):
+    except (
+        TypeError,
+        ValueError,
+    ):
         return str(value)
 
 
@@ -336,7 +383,7 @@ def format_feature_value(
     feature_value,
 ):
     """
-    依 SHAP 特徵類型格式化實際數值。
+    依 SHAP 特徵類型格式化實際值。
     """
 
     if pd.isna(feature_value):
@@ -393,6 +440,69 @@ def format_feature_value(
         return f"{feature_value:.2f} 倍"
 
     return f"{feature_value:.6f}"
+
+
+def create_summary_card(
+    label,
+    value,
+    note="",
+    accent_color="#2563eb",
+):
+    """
+    建立個股摘要卡片。
+    """
+
+    return f"""
+    <div style="
+        width: 100%;
+        min-height: 150px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 20px;
+        background: linear-gradient(
+            145deg,
+            #ffffff 0%,
+            #f8fbff 100%
+        );
+        border: 1px solid #dce5ef;
+        border-top: 4px solid {accent_color};
+        border-radius: 16px;
+        box-shadow:
+            0 5px 18px rgba(
+                30,
+                64,
+                175,
+                0.09
+            );
+    ">
+        <div style="
+            color: #5f6f85;
+            font-size: 0.95rem;
+            font-weight: 700;
+        ">
+            {label}
+        </div>
+
+        <div style="
+            color: #172033;
+            font-size: 1.85rem;
+            font-weight: 850;
+            line-height: 1.2;
+        ">
+            {value}
+        </div>
+
+        <div style="
+            color: #66768b;
+            font-size: 0.85rem;
+            font-weight: 600;
+        ">
+            {note}
+        </div>
+    </div>
+    """
 
 
 # ==================================================
@@ -454,12 +564,36 @@ if missing_ranking_columns:
 # 頁面標題
 # ==================================================
 
-st.title("個股 AI 分析")
+page_hero_html = """
+<div class="ai-hero">
+    <div class="ai-hero-title">
+        個股 AI 深度分析
+    </div>
 
-st.caption(
-    "查看個股 AI 排名、最新技術指標、"
-    "歷史走勢、法人籌碼摘要及 SHAP 模型解釋。"
-)
+    <div class="ai-hero-subtitle">
+        查看個股 AI 排名、最新技術指標、
+        歷史價格走勢、法人籌碼摘要及
+        SHAP 模型解釋。
+    </div>
+
+    <div style="margin-top: 18px;">
+        <span class="ai-badge ai-badge-blue">
+            技術分析
+        </span>
+
+        <span class="ai-badge ai-badge-green">
+            法人籌碼
+        </span>
+
+        <span class="ai-badge ai-badge-purple">
+            SHAP 解釋
+        </span>
+    </div>
+</div>
+"""
+
+
+st.html(page_hero_html)
 
 
 # ==================================================
@@ -527,7 +661,7 @@ selected_features = (
 
 
 # ==================================================
-# 個股 AI 摘要
+# 個股標題
 # ==================================================
 
 st.subheader(
@@ -536,78 +670,122 @@ st.subheader(
 )
 
 
-if "Industry" in selected_ranking.index:
-    st.caption(
-        "產業族群："
-        f'{selected_ranking["Industry"]}'
+industry_name = str(
+    selected_ranking.get(
+        "Industry",
+        "未分類",
+    )
+)
+
+
+data_date = pd.to_datetime(
+    selected_ranking.get(
+        "date",
+        pd.NaT,
+    ),
+    errors="coerce",
+)
+
+
+date_text = (
+    data_date.strftime("%Y-%m-%d")
+    if pd.notna(data_date)
+    else "日期不足"
+)
+
+
+st.caption(
+    f"產業族群：{industry_name}"
+    f"｜排行榜資料日期：{date_text}"
+)
+
+
+# ==================================================
+# 個股摘要卡片
+# ==================================================
+
+summary_col1, summary_col2, \
+summary_col3, summary_col4, \
+summary_col5 = st.columns(
+    5,
+    gap="small",
+)
+
+
+with summary_col1:
+    st.html(
+        create_summary_card(
+            label="AI 排名",
+            value=(
+                f'第 '
+                f'{int(selected_ranking["Rank"])} '
+                f'名'
+            ),
+            note="85 檔股票相對排名",
+            accent_color="#2563eb",
+        )
     )
 
 
-summary_col1, summary_col2, summary_col3, \
-summary_col4, summary_col5 = st.columns(5)
-
-
-summary_col1.metric(
-    "AI 排名",
-    f'第 {int(selected_ranking["Rank"])} 名',
-)
-
-
-summary_col2.metric(
-    "AI 分數",
-    safe_number(
-        selected_ranking,
-        "AI_Score",
-        "{:.2f}",
-    ),
-)
-
-
-summary_col3.metric(
-    "最新收盤價",
-    safe_number(
-        selected_ranking,
-        "Close",
-        "{:.2f}",
-    ),
-)
-
-
-summary_col4.metric(
-    "模型訊號",
-    str(
-        selected_ranking.get(
-            "Signal",
-            "資料不足",
+with summary_col2:
+    st.html(
+        create_summary_card(
+            label="AI 分數",
+            value=safe_number(
+                selected_ranking,
+                "AI_Score",
+                "{:.2f}",
+            ),
+            note="相對排序分數",
+            accent_color="#6d28d9",
         )
-    ),
-)
-
-
-summary_col5.metric(
-    "風險等級",
-    str(
-        selected_ranking.get(
-            "Risk_Level",
-            "資料不足",
-        )
-    ),
-)
-
-
-data_date = None
-
-if "date" in selected_ranking.index:
-    data_date = pd.to_datetime(
-        selected_ranking.get("date"),
-        errors="coerce",
     )
 
 
-if pd.notna(data_date):
-    st.caption(
-        "排行榜資料日期："
-        f"{data_date.strftime('%Y-%m-%d')}"
+with summary_col3:
+    st.html(
+        create_summary_card(
+            label="最新收盤價",
+            value=safe_number(
+                selected_ranking,
+                "Close",
+                "{:.2f}",
+            ),
+            note=date_text,
+            accent_color="#0891b2",
+        )
+    )
+
+
+with summary_col4:
+    st.html(
+        create_summary_card(
+            label="模型訊號",
+            value=str(
+                selected_ranking.get(
+                    "Signal",
+                    "資料不足",
+                )
+            ),
+            note="依 AI 分數區間分類",
+            accent_color="#d97706",
+        )
+    )
+
+
+with summary_col5:
+    st.html(
+        create_summary_card(
+            label="風險等級",
+            value=str(
+                selected_ranking.get(
+                    "Risk_Level",
+                    "資料不足",
+                )
+            ),
+            note="依 ATR 波動比例判定",
+            accent_color="#dc2626",
+        )
     )
 
 
@@ -631,7 +809,9 @@ period_options = {
 
 selected_period = st.radio(
     "顯示期間",
-    options=list(period_options.keys()),
+    options=list(
+        period_options.keys()
+    ),
     horizontal=True,
 )
 
@@ -667,32 +847,38 @@ elif any(
 
 else:
 
-    chart_df = (
+    full_price_df = (
         price_df
+        .sort_values("date")
+        .copy()
+    )
+
+    full_price_df["MA5"] = (
+        full_price_df["Close"]
+        .rolling(5)
+        .mean()
+    )
+
+    full_price_df["MA20"] = (
+        full_price_df["Close"]
+        .rolling(20)
+        .mean()
+    )
+
+    full_price_df["MA60"] = (
+        full_price_df["Close"]
+        .rolling(60)
+        .mean()
+    )
+
+    chart_df = (
+        full_price_df
         .tail(
             period_options[
                 selected_period
             ]
         )
         .copy()
-    )
-
-    chart_df["MA5"] = (
-        chart_df["Close"]
-        .rolling(5)
-        .mean()
-    )
-
-    chart_df["MA20"] = (
-        chart_df["Close"]
-        .rolling(20)
-        .mean()
-    )
-
-    chart_df["MA60"] = (
-        chart_df["Close"]
-        .rolling(60)
-        .mean()
     )
 
     price_figure = go.Figure()
@@ -705,8 +891,10 @@ else:
             low=chart_df["Low"],
             close=chart_df["Close"],
             name="K 線",
-            increasing_line_color="#D62728",
-            decreasing_line_color="#2CA02C",
+            increasing_line_color="#dc2626",
+            increasing_fillcolor="#dc2626",
+            decreasing_line_color="#16a34a",
+            decreasing_fillcolor="#16a34a",
         )
     )
 
@@ -717,8 +905,8 @@ else:
             name="MA5",
             mode="lines",
             line={
-                "color": "#F5A623",
-                "width": 1.5,
+                "color": "#f59e0b",
+                "width": 1.7,
             },
         )
     )
@@ -730,8 +918,8 @@ else:
             name="MA20",
             mode="lines",
             line={
-                "color": "#1F77B4",
-                "width": 1.8,
+                "color": "#2563eb",
+                "width": 1.9,
             },
         )
     )
@@ -743,24 +931,72 @@ else:
             name="MA60",
             mode="lines",
             line={
-                "color": "#9467BD",
-                "width": 1.8,
+                "color": "#7c3aed",
+                "width": 1.9,
             },
         )
     )
 
     price_figure.update_layout(
-        height=600,
+        height=650,
+        margin={
+            "l": 35,
+            "r": 35,
+            "t": 70,
+            "b": 80,
+        },
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
-        title=(
-            f'{selected_ranking["StockID"]} '
-            f'{selected_ranking["StockName"]} '
-            f'{selected_period}走勢'
-        ),
-        xaxis_title="日期",
-        yaxis_title="股價",
-        legend_title="價格指標",
+        title={
+            "text": (
+                f'{selected_ranking["StockID"]} '
+                f'{selected_ranking["StockName"]} '
+                f'{selected_period}走勢'
+            ),
+            "font": {
+                "size": 20,
+                "color": "#172033",
+            },
+            "x": 0.02,
+        },
+        xaxis={
+            "title": {
+                "text": "日期",
+                "standoff": 18,
+            },
+            "automargin": True,
+            "showgrid": True,
+            "gridcolor": "#edf2f7",
+        },
+        yaxis={
+            "title": {
+                "text": "股價",
+                "standoff": 16,
+            },
+            "automargin": True,
+            "showgrid": True,
+            "gridcolor": "#edf2f7",
+        },
+        legend={
+            "title": {
+                "text": "價格指標",
+            },
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+        },
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font={
+            "family": (
+                "Microsoft JhengHei, "
+                "Noto Sans TC, Arial"
+            ),
+            "color": "#172033",
+            "size": 13,
+        },
     )
 
     st.plotly_chart(
@@ -773,7 +1009,7 @@ st.divider()
 
 
 # ==================================================
-# 最新技術指標
+# 最新技術與量價指標
 # ==================================================
 
 st.subheader("最新技術與量價指標")
@@ -813,7 +1049,10 @@ technical_metrics = [
 ]
 
 
-technical_columns = st.columns(3)
+technical_columns = st.columns(
+    3,
+    gap="medium",
+)
 
 
 for index, (
@@ -847,14 +1086,15 @@ st.divider()
 
 
 # ==================================================
-# 技術面與籌碼面摘要
+# 技術與籌碼規則式摘要
 # ==================================================
 
 st.subheader("技術面與籌碼面摘要")
 
 st.caption(
     "以下內容依最新特徵數值產生，"
-    "屬於規則式狀態摘要，不是模型內部判斷原因。"
+    "屬於規則式狀態摘要，"
+    "並不是模型內部的判斷原因。"
 )
 
 
@@ -871,14 +1111,22 @@ if pd.notna(close_ma20_ratio):
 
     if close_ma20_ratio > 0:
         summary_messages.append(
-            "股價位於 20 日均線上方，"
-            "目前中短期價格位置相對偏強。"
+            (
+                "價格趨勢",
+                "股價位於 20 日均線上方，"
+                "中短期價格位置相對偏強。",
+                "#2563eb",
+            )
         )
 
     else:
         summary_messages.append(
-            "股價位於 20 日均線下方，"
-            "目前中短期價格位置相對偏弱。"
+            (
+                "價格趨勢",
+                "股價位於 20 日均線下方，"
+                "中短期價格位置相對偏弱。",
+                "#d97706",
+            )
         )
 
 
@@ -892,14 +1140,22 @@ if pd.notna(ma5_ma20_ratio):
 
     if ma5_ma20_ratio > 0:
         summary_messages.append(
-            "MA5 高於 MA20，"
-            "短期均線結構相對偏多。"
+            (
+                "均線結構",
+                "MA5 高於 MA20，"
+                "短期均線結構相對偏多。",
+                "#2563eb",
+            )
         )
 
     else:
         summary_messages.append(
-            "MA5 低於 MA20，"
-            "短期均線結構相對偏弱。"
+            (
+                "均線結構",
+                "MA5 低於 MA20，"
+                "短期均線結構相對偏弱。",
+                "#d97706",
+            )
         )
 
 
@@ -913,12 +1169,20 @@ if pd.notna(volume_ratio):
 
     if volume_ratio > 1:
         summary_messages.append(
-            "當日成交量高於 20 日平均成交量。"
+            (
+                "成交量",
+                "當日成交量高於 20 日平均成交量。",
+                "#6d28d9",
+            )
         )
 
     else:
         summary_messages.append(
-            "當日成交量低於 20 日平均成交量。"
+            (
+                "成交量",
+                "當日成交量低於 20 日平均成交量。",
+                "#64748b",
+            )
         )
 
 
@@ -930,20 +1194,25 @@ foreign_5d = selected_features.get(
 
 if pd.notna(foreign_5d):
 
-    if foreign_5d > 0:
-        summary_messages.append(
-            "外資近 5 日累計買賣超比例為正。"
-        )
+    foreign_text = (
+        "外資近 5 日累計買賣超比例為正。"
+        if foreign_5d > 0
+        else "外資近 5 日累計買賣超比例為負。"
+        if foreign_5d < 0
+        else "外資近 5 日累計買賣超接近中性。"
+    )
 
-    elif foreign_5d < 0:
-        summary_messages.append(
-            "外資近 5 日累計買賣超比例為負。"
+    summary_messages.append(
+        (
+            "外資籌碼",
+            foreign_text,
+            (
+                "#dc2626"
+                if foreign_5d > 0
+                else "#16a34a"
+            ),
         )
-
-    else:
-        summary_messages.append(
-            "外資近 5 日累計買賣超接近中性。"
-        )
+    )
 
 
 trust_5d = selected_features.get(
@@ -954,26 +1223,79 @@ trust_5d = selected_features.get(
 
 if pd.notna(trust_5d):
 
-    if trust_5d > 0:
-        summary_messages.append(
-            "投信近 5 日累計買賣超比例為正。"
-        )
+    trust_text = (
+        "投信近 5 日累計買賣超比例為正。"
+        if trust_5d > 0
+        else "投信近 5 日累計買賣超比例為負。"
+        if trust_5d < 0
+        else "投信近 5 日累計買賣超接近中性。"
+    )
 
-    elif trust_5d < 0:
-        summary_messages.append(
-            "投信近 5 日累計買賣超比例為負。"
+    summary_messages.append(
+        (
+            "投信籌碼",
+            trust_text,
+            (
+                "#dc2626"
+                if trust_5d > 0
+                else "#16a34a"
+            ),
         )
-
-    else:
-        summary_messages.append(
-            "投信近 5 日累計買賣超接近中性。"
-        )
+    )
 
 
 if summary_messages:
 
-    for message in summary_messages:
-        st.write(f"• {message}")
+    summary_columns = st.columns(
+        len(summary_messages),
+        gap="small",
+    )
+
+    for column, (
+        title,
+        message,
+        color,
+    ) in zip(
+        summary_columns,
+        summary_messages,
+    ):
+
+        summary_card_html = f"""
+        <div style="
+            min-height: 145px;
+            box-sizing: border-box;
+            padding: 18px;
+            background: #ffffff;
+            border: 1px solid #dce5ef;
+            border-left: 5px solid {color};
+            border-radius: 14px;
+            box-shadow:
+                0 4px 14px
+                rgba(30, 64, 175, 0.07);
+        ">
+            <div style="
+                color: #172033;
+                font-size: 1rem;
+                font-weight: 800;
+                margin-bottom: 10px;
+            ">
+                {title}
+            </div>
+
+            <div style="
+                color: #5f6f85;
+                font-size: 0.9rem;
+                line-height: 1.7;
+            ">
+                {message}
+            </div>
+        </div>
+        """
+
+        with column:
+            st.html(
+                summary_card_html
+            )
 
 else:
 
@@ -992,8 +1314,8 @@ st.divider()
 st.subheader("SHAP 模型解釋")
 
 st.caption(
-    "SHAP 解釋每個特徵如何影響 XGBoost "
-    "對所選股票的模型輸出。"
+    "SHAP 用來解釋每個特徵如何影響 "
+    "XGBoost 對所選股票的模型輸出。"
     "正值代表推升 Target = 1 的模型輸出，"
     "負值代表壓低模型輸出。"
 )
@@ -1080,19 +1402,20 @@ else:
             .copy()
         )
 
-        positive_col, negative_col = (
-            st.columns(2)
+        positive_col, negative_col = st.columns(
+            2,
+            gap="large",
         )
 
         with positive_col:
 
             st.markdown(
-                "### 推升 AI 分數的主要因素"
+                "### 🔴 推升 AI 分數的主要因素"
             )
 
             if positive_shap_df.empty:
 
-                st.write(
+                st.info(
                     "目前沒有明顯正向因素。"
                 )
 
@@ -1102,23 +1425,40 @@ else:
                     positive_shap_df.iterrows()
                 ):
 
-                    st.markdown(
-                        f'**{row["特徵名稱"]}**  \n'
-                        f'實際值：'
-                        f'{row["特徵實際值"]}  \n'
-                        f'SHAP 貢獻：'
-                        f'`{row["SHAP_Value"]:+.4f}`'
+                    positive_card_html = f"""
+                    <div class="shap-positive-card">
+                        <div class="shap-feature-name">
+                            {row["特徵名稱"]}
+                        </div>
+
+                        <div class="shap-feature-value">
+                            特徵實際值：
+                            <strong>
+                                {row["特徵實際值"]}
+                            </strong>
+                            <br>
+
+                            SHAP 貢獻：
+                            <strong>
+                                {row["SHAP_Value"]:+.4f}
+                            </strong>
+                        </div>
+                    </div>
+                    """
+
+                    st.html(
+                        positive_card_html
                     )
 
         with negative_col:
 
             st.markdown(
-                "### 壓低 AI 分數的主要因素"
+                "### 🟢 壓低 AI 分數的主要因素"
             )
 
             if negative_shap_df.empty:
 
-                st.write(
+                st.info(
                     "目前沒有明顯負向因素。"
                 )
 
@@ -1128,12 +1468,29 @@ else:
                     negative_shap_df.iterrows()
                 ):
 
-                    st.markdown(
-                        f'**{row["特徵名稱"]}**  \n'
-                        f'實際值：'
-                        f'{row["特徵實際值"]}  \n'
-                        f'SHAP 貢獻：'
-                        f'`{row["SHAP_Value"]:+.4f}`'
+                    negative_card_html = f"""
+                    <div class="shap-negative-card">
+                        <div class="shap-feature-name">
+                            {row["特徵名稱"]}
+                        </div>
+
+                        <div class="shap-feature-value">
+                            特徵實際值：
+                            <strong>
+                                {row["特徵實際值"]}
+                            </strong>
+                            <br>
+
+                            SHAP 貢獻：
+                            <strong>
+                                {row["SHAP_Value"]:+.4f}
+                            </strong>
+                        </div>
+                    </div>
+                    """
+
+                    st.html(
+                        negative_card_html
                     )
 
         st.markdown(
@@ -1171,8 +1528,8 @@ else:
             orientation="h",
             color="影響方向",
             color_discrete_map={
-                "推升模型分數": "#D62728",
-                "壓低模型分數": "#2CA02C",
+                "推升模型分數": "#dc2626",
+                "壓低模型分數": "#16a34a",
             },
             custom_data=[
                 "Feature",
@@ -1184,9 +1541,6 @@ else:
             },
         )
 
-        # 修正版滑鼠提示：
-        # x 軸本身就是 SHAP_Value，
-        # 因此直接使用 %{x:+.4f} 顯示。
         shap_figure.update_traces(
             hovertemplate=(
                 "<b>%{y}</b><br>"
@@ -1201,13 +1555,73 @@ else:
         )
 
         shap_figure.update_layout(
-            height=560,
-            xaxis_title=(
-                "對 XGBoost 模型原始輸出的貢獻"
-            ),
-            yaxis_title="",
-            legend_title="影響方向",
+            height=620,
+            margin={
+                "l": 35,
+                "r": 45,
+                "t": 70,
+                "b": 90,
+            },
+            plot_bgcolor="#ffffff",
+            paper_bgcolor="#ffffff",
             hovermode="closest",
+            font={
+                "family": (
+                    "Microsoft JhengHei, "
+                    "Noto Sans TC, Arial"
+                ),
+                "color": "#172033",
+                "size": 14,
+            },
+            xaxis={
+                "automargin": True,
+                "title": {
+                    "text": (
+                        "對 XGBoost 模型原始輸出的貢獻"
+                    ),
+                    "standoff": 22,
+                    "font": {
+                        "size": 15,
+                        "color": "#65748b",
+                    },
+                },
+                "tickfont": {
+                    "size": 12,
+                    "color": "#65748b",
+                },
+                "showgrid": True,
+                "gridcolor": "#edf2f7",
+                "zeroline": False,
+            },
+            yaxis={
+                "automargin": True,
+                "title": {
+                    "text": "",
+                },
+                "tickfont": {
+                    "size": 13,
+                    "color": "#4b5d73",
+                },
+            },
+            legend={
+                "title": {
+                    "text": "影響方向",
+                },
+                "orientation": "h",
+                "yanchor": "bottom",
+                "y": 1.02,
+                "xanchor": "right",
+                "x": 1,
+            },
+            hoverlabel={
+                "font": {
+                    "family": (
+                        "Microsoft JhengHei, "
+                        "Noto Sans TC, Arial"
+                    ),
+                    "size": 13,
+                },
+            },
         )
 
         shap_figure.add_vline(
@@ -1258,12 +1672,22 @@ else:
 
 st.divider()
 
+
 st.info(
     "AI 分數是模型用於 85 檔股票相對排序的分數，"
-    "尚未經過機率校準，不應直接視為真實上漲機率。"
+    "尚未經過機率校準，"
+    "不應直接視為真實上漲機率。"
 )
+
 
 st.warning(
     "本平台僅供課程專題、資料分析與模型研究，"
     "不構成投資建議、買賣推薦或獲利保證。"
 )
+
+
+# ==================================================
+# 共用頁尾
+# ==================================================
+
+render_footer()
