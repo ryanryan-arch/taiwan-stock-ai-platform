@@ -78,6 +78,9 @@ jobs:
       - name: Calculate latest SHAP explanations
         run: |
           python scripts/calculate_shap.py
+    - name: Update AI Top 10 live performance
+        run: python scripts/update_top10_performance.py
+    
 
       # ============================================
       # 7. 檢查 Python 程式語法
@@ -136,6 +139,15 @@ jobs:
               / "update_status.json"
           )
 
+          TOP10_SNAPSHOT_PATH = (
+            RESULT_DIR
+            / "daily_top10_snapshots.csv"
+            )
+
+          TOP10_PERFORMANCE_PATH = (
+            RESULT_DIR
+             / "daily_top10_performance.csv"
+            )
           shap_path = (
               result_dir
               / "latest_shap_values.parquet"
@@ -490,6 +502,8 @@ jobs:
           git add results/latest_shap_values.parquet
           git add results/global_shap_importance.csv
           git add results/shap_status.json
+          git add results/daily_top10_snapshots.csv
+          git add results/daily_top10_performance.csv
 
           if git diff --cached --quiet; then
             echo "No new stock or SHAP data to commit."
