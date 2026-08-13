@@ -31,7 +31,15 @@ INDUSTRY_RANKING_PATH = (
 UPDATE_STATUS_PATH = (
     RESULT_DIR / "update_status.json"
 )
+TOP10_SNAPSHOT_PATH = (
+    RESULT_DIR
+    / "daily_top10_snapshots.csv"
+)
 
+TOP10_PERFORMANCE_PATH = (
+    RESULT_DIR
+    / "daily_top10_performance.csv"
+)
 
 # ==================================================
 # Streamlit 頁面設定
@@ -188,7 +196,125 @@ def load_update_status():
     ):
         return default_status
 
+@st.cache_data(ttl=300)
+def load_top10_snapshots():
+    """
+    載入每日 AI Top 10 推薦快照。
+    """
 
+    if not TOP10_SNAPSHOT_PATH.exists():
+        return pd.DataFrame()
+
+    try:
+        dataframe = pd.read_csv(
+            TOP10_SNAPSHOT_PATH,
+            dtype={
+                "StockID": str,
+            },
+        )
+
+    except (
+        OSError,
+        UnicodeDecodeError,
+        pd.errors.ParserError,
+    ):
+        return pd.DataFrame()
+
+    if "StockID" in dataframe.columns:
+        dataframe["StockID"] = (
+            dataframe["StockID"]
+            .astype(str)
+            .str.replace(
+                r"\.0$",
+                "",
+                regex=True,
+            )
+            .str.zfill(4)
+        )
+
+    date_columns = [
+        "Recommendation_Date",
+        "Target_Date",
+        "Completed_Date",
+    ]
+
+    for column in date_columns:
+        if column in dataframe.columns:
+            dataframe[column] = pd.to_datetime(
+                dataframe[column],
+                errors="coerce",
+            )
+
+    numeric_columns = [
+        "Rank",
+        "AI_Score",
+        "Entry_Close",
+        "Elapsed_Trading_Days",
+        "Exit_Close",
+        "Actual_Return_5D",
+        "Weight",
+        "Contribution_Return",
+    ]
+
+    for column in numeric_columns:
+        if column in dataframe.columns:
+            dataframe[column] = pd.to_numeric(
+                dataframe[column],
+                errors="coerce",
+            )
+
+    return dataframe
+
+
+@st.cache_data(ttl=300)
+def load_top10_performance():
+    """
+    載入每日 AI Top 10 組合實績。
+    """
+
+    if not TOP10_PERFORMANCE_PATH.exists():
+        return pd.DataFrame()
+
+    try:
+        dataframe = pd.read_csv(
+            TOP10_PERFORMANCE_PATH,
+        )
+
+    except (
+        OSError,
+        UnicodeDecodeError,
+        pd.errors.ParserError,
+    ):
+        return pd.DataFrame()
+
+    if "Recommendation_Date" in dataframe.columns:
+        dataframe["Recommendation_Date"] = pd.to_datetime(
+            dataframe["Recommendation_Date"],
+            errors="coerce",
+        )
+
+    numeric_columns = [
+        "Completed_Stocks",
+        "Total_Stocks",
+        "Gross_Return",
+        "Trading_Cost",
+        "Net_Return",
+        "Win_Count",
+        "Loss_Count",
+        "Win_Rate",
+        "Net_Equity",
+        "Running_Max_Equity",
+        "Drawdown",
+    ]
+
+    for column in numeric_columns:
+        if column in dataframe.columns:
+            dataframe[column] = pd.to_numeric(
+                dataframe[column],
+                errors="coerce",
+            )
+
+    return dataframe
 # ==================================================
 # 載入資料
 # ==================================================
@@ -197,7 +323,9 @@ ranking_df = load_rankings()
 industry_df = load_industry_rankings()
 update_status = load_update_status()
 
+top10_snapshot_df = load_top10_snapshots()
 
+top10_performance_df = load_top10_performance()
 # ==================================================
 # 必要資料檢查
 # ==================================================
@@ -1133,7 +1261,592 @@ st.divider()
 
 
   
+# ==================================================
+# AI Top 10 上線實績追蹤
+# ==================================================
 
+st.subheader(
+    "AI Top 10 上線實績追蹤"
+)
+
+st.caption(
+    "系統每日保存 AI 排名前 10 名股票，"
+    "等待後續第 5 個實際交易日完成後，"
+    "自動回填真實五日報酬率。"
+)
+
+
+if (
+    top10_snapshot_df.empty
+    or top10_performance_df.empty
+):
+
+    st.info(
+        "目前尚無 AI Top 10 實績追蹤資料。"
+        "每日更新流程執行後，"
+        "系統將開始累積推薦紀錄。"
+    )
+
+else:
+
+    valid_performance_df = (
+        top10_performance_df
+        .dropna(
+            subset=[
+                "Recommendation_Date",
+            ]
+        )
+        .sort_values(
+            "Recommendation_Date",
+            ascending=False,
+        )
+        .reset_index(drop=True)
+        .copy()
+    )
+
+    if valid_performance_df.empty:
+
+        st.info(
+            "目前尚無有效的 Top 10 實績資料。"
+        )
+
+    else:
+
+        latest_performance = (
+            valid_performance_df.iloc[0]
+        )
+
+        latest_recommendation_date = (
+            latest_performance[
+                "Recommendation_Date"
+            ]
+        )
+
+        latest_status = str(
+            latest_performance.get(
+                "Status",
+                "觀察中",
+            )
+        )
+
+        completed_stocks = pd.to_numeric(
+            latest_performance.get(
+                "Completed_Stocks",
+                0,
+            ),
+            errors="coerce",
+        )
+
+        total_stocks = pd.to_numeric(
+            latest_performance.get(
+                "Total_Stocks",
+                10,
+            ),
+            errors="coerce",
+        )
+
+        gross_return = pd.to_numeric(
+            latest_performance.get(
+                "Gross_Return",
+                float("nan"),
+            ),
+            errors="coerce",
+        )
+
+        net_return = pd.to_numeric(
+            latest_performance.get(
+                "Net_Return",
+                float("nan"),
+            ),
+            errors="coerce",
+        )
+
+        latest_snapshot_df = (
+            top10_snapshot_df[
+                top10_snapshot_df[
+                    "Recommendation_Date"
+                ]
+                == latest_recommendation_date
+            ]
+            .sort_values("Rank")
+            .copy()
+        )
+
+        if (
+            not latest_snapshot_df.empty
+            and "Elapsed_Trading_Days"
+            in latest_snapshot_df.columns
+        ):
+
+            elapsed_days = pd.to_numeric(
+                latest_snapshot_df[
+                    "Elapsed_Trading_Days"
+                ],
+                errors="coerce",
+            ).max()
+
+        else:
+
+            elapsed_days = 0
+
+        if pd.isna(elapsed_days):
+            elapsed_days = 0
+
+        if pd.isna(completed_stocks):
+            completed_stocks = 0
+
+        if pd.isna(total_stocks):
+            total_stocks = 10
+
+        recommendation_date_text = (
+            latest_recommendation_date.strftime(
+                "%Y-%m-%d"
+            )
+        )
+
+        if latest_status == "已完成":
+
+            status_color = "#047857"
+            status_background = "#dcfce7"
+            status_border = "#10b981"
+
+        elif latest_status == "資料不足":
+
+            status_color = "#b45309"
+            status_background = "#fef3c7"
+            status_border = "#f59e0b"
+
+        else:
+
+            status_color = "#1d4ed8"
+            status_background = "#dbeafe"
+            status_border = "#2563eb"
+
+        status_html = f"""
+        <div style="
+            width: 100%;
+            box-sizing: border-box;
+            padding: 20px 24px;
+            margin-bottom: 18px;
+            background: {status_background};
+            border: 1px solid {status_border};
+            border-left: 6px solid {status_border};
+            border-radius: 15px;
+        ">
+
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 18px;
+                flex-wrap: wrap;
+            ">
+
+                <div>
+                    <div style="
+                        color: #5f6f85;
+                        font-size: 0.90rem;
+                        font-weight: 700;
+                    ">
+                        最新推薦日期
+                    </div>
+
+                    <div style="
+                        color: #172033;
+                        font-size: 1.35rem;
+                        font-weight: 850;
+                        margin-top: 5px;
+                    ">
+                        {recommendation_date_text}
+                    </div>
+                </div>
+
+                <div style="
+                    display: inline-block;
+                    padding: 8px 16px;
+                    color: {status_color};
+                    background: #ffffff;
+                    border: 1px solid {status_border};
+                    border-radius: 999px;
+                    font-size: 0.95rem;
+                    font-weight: 800;
+                ">
+                    {latest_status}
+                </div>
+
+                <div>
+                    <div style="
+                        color: #5f6f85;
+                        font-size: 0.90rem;
+                        font-weight: 700;
+                    ">
+                        交易日進度
+                    </div>
+
+                    <div style="
+                        color: #172033;
+                        font-size: 1.35rem;
+                        font-weight: 850;
+                        margin-top: 5px;
+                    ">
+                        {int(elapsed_days)} / 5
+                    </div>
+                </div>
+
+                <div>
+                    <div style="
+                        color: #5f6f85;
+                        font-size: 0.90rem;
+                        font-weight: 700;
+                    ">
+                        完成股票數
+                    </div>
+
+                    <div style="
+                        color: #172033;
+                        font-size: 1.35rem;
+                        font-weight: 850;
+                        margin-top: 5px;
+                    ">
+                        {int(completed_stocks)}
+                        /
+                        {int(total_stocks)}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        """
+
+        st.html(
+            status_html
+        )
+
+        if pd.notna(gross_return):
+
+            gross_return_text = (
+                f"{gross_return:.2%}"
+            )
+
+        else:
+
+            gross_return_text = "觀察中"
+
+        if pd.notna(net_return):
+
+            net_return_text = (
+                f"{net_return:.2%}"
+            )
+
+        else:
+
+            net_return_text = "觀察中"
+
+        completed_period_count = int(
+            (
+                top10_performance_df[
+                    "Status"
+                ]
+                == "已完成"
+            ).sum()
+        )
+
+        metric_col1, metric_col2, metric_col3 = (
+            st.columns(
+                3,
+                gap="medium",
+            )
+        )
+
+        metric_col1.metric(
+            "Top 10 平均毛報酬",
+            gross_return_text,
+        )
+
+        metric_col2.metric(
+            "成本後淨報酬",
+            net_return_text,
+            help=(
+                "Top 10 平均毛報酬扣除"
+                "完整交易成本 0.60%。"
+            ),
+        )
+
+        metric_col3.metric(
+            "已完成追蹤期數",
+            completed_period_count,
+        )
+
+        if not latest_snapshot_df.empty:
+
+            snapshot_display_df = (
+                latest_snapshot_df.copy()
+            )
+
+            snapshot_display_df[
+                "交易日進度"
+            ] = (
+                pd.to_numeric(
+                    snapshot_display_df[
+                        "Elapsed_Trading_Days"
+                    ],
+                    errors="coerce",
+                )
+                .fillna(0)
+                .astype(int)
+                .astype(str)
+                + " / 5"
+            )
+
+            if (
+                "Actual_Return_5D"
+                in snapshot_display_df.columns
+            ):
+
+                snapshot_display_df[
+                    "實際五日報酬率"
+                ] = snapshot_display_df[
+                    "Actual_Return_5D"
+                ].apply(
+                    lambda value: (
+                        f"{value:.2%}"
+                        if pd.notna(value)
+                        else "觀察中"
+                    )
+                )
+
+            else:
+
+                snapshot_display_df[
+                    "實際五日報酬率"
+                ] = "觀察中"
+
+            display_columns = [
+                column
+                for column in [
+                    "Rank",
+                    "StockID",
+                    "StockName",
+                    "Industry",
+                    "AI_Score",
+                    "Entry_Close",
+                    "Status",
+                    "交易日進度",
+                    "Target_Date",
+                    "Exit_Close",
+                    "實際五日報酬率",
+                ]
+                if column
+                in snapshot_display_df.columns
+            ]
+
+            st.dataframe(
+                snapshot_display_df[
+                    display_columns
+                ],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Rank": (
+                        st.column_config.NumberColumn(
+                            "推薦排名",
+                            format="%d",
+                        )
+                    ),
+
+                    "StockID": (
+                        st.column_config.TextColumn(
+                            "股票代碼",
+                        )
+                    ),
+
+                    "StockName": (
+                        st.column_config.TextColumn(
+                            "股票名稱",
+                        )
+                    ),
+
+                    "Industry": (
+                        st.column_config.TextColumn(
+                            "產業族群",
+                        )
+                    ),
+
+                    "AI_Score": (
+                        st.column_config.NumberColumn(
+                            "AI 分數",
+                            format="%.2f",
+                        )
+                    ),
+
+                    "Entry_Close": (
+                        st.column_config.NumberColumn(
+                            "推薦日收盤價",
+                            format="%.2f",
+                        )
+                    ),
+
+                    "Status": (
+                        st.column_config.TextColumn(
+                            "追蹤狀態",
+                        )
+                    ),
+
+                    "交易日進度": (
+                        st.column_config.TextColumn(
+                            "交易日進度",
+                        )
+                    ),
+
+                    "Target_Date": (
+                        st.column_config.DateColumn(
+                            "第 5 個交易日",
+                            format="YYYY-MM-DD",
+                        )
+                    ),
+
+                    "Exit_Close": (
+                        st.column_config.NumberColumn(
+                            "完成日收盤價",
+                            format="%.2f",
+                        )
+                    ),
+
+                    "實際五日報酬率": (
+                        st.column_config.TextColumn(
+                            "實際五日報酬率",
+                        )
+                    ),
+                },
+            )
+
+        with st.expander(
+            "查看歷史 AI Top 10 實績"
+        ):
+
+            history_display_df = (
+                valid_performance_df.copy()
+            )
+
+            for source_column, display_column in [
+                (
+                    "Gross_Return",
+                    "平均毛報酬",
+                ),
+                (
+                    "Trading_Cost",
+                    "交易成本",
+                ),
+                (
+                    "Net_Return",
+                    "成本後淨報酬",
+                ),
+                (
+                    "Win_Rate",
+                    "個股勝率",
+                ),
+                (
+                    "Drawdown",
+                    "回撤",
+                ),
+            ]:
+
+                if (
+                    source_column
+                    in history_display_df.columns
+                ):
+
+                    history_display_df[
+                        display_column
+                    ] = history_display_df[
+                        source_column
+                    ].apply(
+                        lambda value: (
+                            f"{value:.2%}"
+                            if pd.notna(value)
+                            else "觀察中"
+                        )
+                    )
+
+            history_columns = [
+                column
+                for column in [
+                    "Recommendation_Date",
+                    "Status",
+                    "Completed_Stocks",
+                    "Total_Stocks",
+                    "平均毛報酬",
+                    "交易成本",
+                    "成本後淨報酬",
+                    "Win_Count",
+                    "Loss_Count",
+                    "個股勝率",
+                    "Net_Equity",
+                    "回撤",
+                ]
+                if column
+                in history_display_df.columns
+            ]
+
+            st.dataframe(
+                history_display_df[
+                    history_columns
+                ],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Recommendation_Date": (
+                        st.column_config.DateColumn(
+                            "推薦日期",
+                            format="YYYY-MM-DD",
+                        )
+                    ),
+
+                    "Status": (
+                        st.column_config.TextColumn(
+                            "狀態",
+                        )
+                    ),
+
+                    "Completed_Stocks": (
+                        st.column_config.NumberColumn(
+                            "完成股票數",
+                            format="%d",
+                        )
+                    ),
+
+                    "Total_Stocks": (
+                        st.column_config.NumberColumn(
+                            "推薦股票數",
+                            format="%d",
+                        )
+                    ),
+
+                    "Win_Count": (
+                        st.column_config.NumberColumn(
+                            "上漲檔數",
+                            format="%d",
+                        )
+                    ),
+
+                    "Loss_Count": (
+                        st.column_config.NumberColumn(
+                            "下跌檔數",
+                            format="%d",
+                        )
+                    ),
+
+                    "Net_Equity": (
+                        st.column_config.NumberColumn(
+                            "累積資產",
+                            format="%.4f",
+                        )
+                    ),
+                },
+            )
+
+
+st.divider()
 
 # ==================================================
 # AI 分數說明
