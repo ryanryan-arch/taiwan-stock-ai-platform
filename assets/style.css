@@ -1,0 +1,758 @@
+/* ==================================================
+   台股 AI 智慧選股平台
+   全站共用 Streamlit 樣式
+   ================================================== */
+
+
+/* --------------------------------------------------
+   全站色彩變數
+   -------------------------------------------------- */
+
+:root {
+    --primary-color: #2563eb;
+    --primary-dark: #1e40af;
+    --secondary-color: #0891b2;
+    --success-color: #059669;
+    --warning-color: #d97706;
+    --danger-color: #dc2626;
+
+    --page-background: #f4f7fb;
+    --sidebar-background: #eef3f9;
+    --card-background: #ffffff;
+
+    --text-primary: #172033;
+    --text-secondary: #5f6f85;
+    --border-color: #dce5ef;
+
+    --positive-color: #dc2626;
+    --negative-color: #16a34a;
+
+    --card-shadow:
+        0 4px 16px rgba(30, 64, 175, 0.08);
+}
+
+
+/* --------------------------------------------------
+   全站字體與背景
+   -------------------------------------------------- */
+
+html,
+body,
+[class*="css"],
+[data-testid="stAppViewContainer"] {
+    font-family:
+        "Microsoft JhengHei",
+        "Noto Sans TC",
+        Arial,
+        sans-serif;
+}
+
+
+/* --------------------------------------------------
+   全站背景顏色
+   -------------------------------------------------- */
+
+[data-testid="stAppViewContainer"] {
+    background-color: #e8f1ff !important;
+
+    background-image:
+        radial-gradient(
+            circle at 8% 5%,
+            rgba(37, 99, 235, 0.14) 0%,
+            transparent 28%
+        ),
+        radial-gradient(
+            circle at 92% 12%,
+            rgba(8, 145, 178, 0.11) 0%,
+            transparent 25%
+        ),
+        linear-gradient(
+            180deg,
+            #f4f8ff 0%,
+            #e8f1ff 48%,
+            #e3edf9 100%
+        ) !important;
+
+    background-attachment: fixed !important;
+    color: var(--text-primary);
+}
+
+/* --------------------------------------------------
+   主內容區域
+   -------------------------------------------------- */
+
+[data-testid="stMainBlockContainer"] {
+    max-width: 1480px;
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+}
+
+
+/* --------------------------------------------------
+   側邊導覽列
+   -------------------------------------------------- */
+
+[data-testid="stSidebar"] {
+    background:
+        linear-gradient(
+            180deg,
+            #f4f8fd 0%,
+            var(--sidebar-background) 100%
+        );
+    border-right: 1px solid var(--border-color);
+}
+
+
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+    color: var(--text-primary);
+}
+
+
+[data-testid="stSidebarNav"] a {
+    border-radius: 10px;
+    margin: 4px 10px;
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease,
+        transform 0.2s ease;
+}
+
+
+[data-testid="stSidebarNav"] a:hover {
+    background-color: #dce9fb;
+    color: var(--primary-dark);
+    transform: translateX(2px);
+}
+
+
+[data-testid="stSidebarNav"] a[aria-current="page"] {
+    background:
+        linear-gradient(
+            90deg,
+            var(--primary-color),
+            #3b82f6
+        );
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow:
+        0 4px 12px rgba(37, 99, 235, 0.24);
+}
+
+
+/* --------------------------------------------------
+   標題
+   -------------------------------------------------- */
+
+h1,
+h2,
+h3 {
+    font-family:
+        "Microsoft JhengHei",
+        "Noto Sans TC",
+        Arial,
+        sans-serif;
+    color: var(--text-primary);
+}
+
+
+h1 {
+    font-weight: 800;
+    letter-spacing: -0.5px;
+}
+
+
+h2 {
+    font-weight: 750;
+}
+
+
+h3 {
+    font-weight: 700;
+}
+
+
+/* --------------------------------------------------
+   分隔線
+   -------------------------------------------------- */
+
+hr {
+    border: none;
+    height: 1px;
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            #c8d7e8,
+            transparent
+        );
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+}
+
+
+/* --------------------------------------------------
+   Streamlit Metric 指標卡片
+   -------------------------------------------------- */
+
+div[data-testid="stMetric"] {
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: var(--card-shadow);
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+
+div[data-testid="stMetric"]:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        0 8px 24px rgba(30, 64, 175, 0.13);
+}
+
+
+div[data-testid="stMetricLabel"] {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+
+div[data-testid="stMetricValue"] {
+    color: var(--text-primary);
+    font-weight: 800;
+}
+
+
+/* --------------------------------------------------
+   一般白色內容卡片
+   -------------------------------------------------- */
+
+.ai-card {
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    padding: 22px 24px;
+    margin-bottom: 18px;
+    box-shadow: var(--card-shadow);
+}
+
+
+.ai-card-title {
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+
+.ai-card-text {
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+
+
+/* --------------------------------------------------
+   首頁品牌 Hero
+   -------------------------------------------------- */
+
+.ai-hero {
+    position: relative;
+    overflow: hidden;
+    background:
+        linear-gradient(
+            120deg,
+            #071a33 0%,
+            #123f75 52%,
+            #0b7892 100%
+        );
+    color: #ffffff;
+    border-radius: 22px;
+    padding: 34px 38px;
+    margin-bottom: 26px;
+    box-shadow:
+        0 12px 32px rgba(7, 26, 51, 0.22);
+}
+
+
+.ai-hero::after {
+    content: "";
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    right: -100px;
+    top: -130px;
+    border-radius: 50%;
+    background:
+        rgba(255, 255, 255, 0.08);
+}
+
+
+.ai-hero-title {
+    position: relative;
+    z-index: 2;
+    font-size: 2rem;
+    font-weight: 850;
+    line-height: 1.35;
+    margin-bottom: 12px;
+}
+
+
+.ai-hero-subtitle {
+    position: relative;
+    z-index: 2;
+    max-width: 900px;
+    color: #d7eaff;
+    font-size: 1rem;
+    line-height: 1.8;
+}
+
+
+/* --------------------------------------------------
+   標籤 Badge
+   -------------------------------------------------- */
+
+.ai-badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 6px 12px;
+    margin-right: 6px;
+    margin-bottom: 6px;
+    font-size: 0.82rem;
+    font-weight: 750;
+}
+
+
+.ai-badge-blue {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+
+.ai-badge-green {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+
+.ai-badge-red {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+
+.ai-badge-orange {
+    background: #ffedd5;
+    color: #c2410c;
+}
+
+
+.ai-badge-purple {
+    background: #ede9fe;
+    color: #6d28d9;
+}
+
+
+/* --------------------------------------------------
+   SHAP 正負因素卡片
+   -------------------------------------------------- */
+
+.shap-positive-card {
+    background:
+        linear-gradient(
+            135deg,
+            #fff5f5,
+            #ffffff
+        );
+    border: 1px solid #fecaca;
+    border-left: 5px solid var(--positive-color);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    box-shadow:
+        0 3px 12px rgba(220, 38, 38, 0.08);
+}
+
+
+.shap-negative-card {
+    background:
+        linear-gradient(
+            135deg,
+            #f0fdf4,
+            #ffffff
+        );
+    border: 1px solid #bbf7d0;
+    border-left: 5px solid var(--negative-color);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    box-shadow:
+        0 3px 12px rgba(22, 163, 74, 0.08);
+}
+
+
+.shap-feature-name {
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 800;
+    margin-bottom: 6px;
+}
+
+
+.shap-feature-value {
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+    line-height: 1.7;
+}
+
+
+/* --------------------------------------------------
+   表格與 DataFrame
+   -------------------------------------------------- */
+
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow:
+        0 3px 14px rgba(30, 64, 175, 0.07);
+}
+
+
+/* --------------------------------------------------
+   輸入框與下拉選單
+   -------------------------------------------------- */
+
+[data-baseweb="select"] > div,
+[data-testid="stTextInput"] input {
+    border-radius: 10px;
+    border-color: #cbd8e6;
+    background-color: #ffffff;
+}
+
+
+[data-baseweb="select"] > div:focus-within,
+[data-testid="stTextInput"] input:focus {
+    border-color: var(--primary-color);
+    box-shadow:
+        0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+
+/* --------------------------------------------------
+   按鈕
+   -------------------------------------------------- */
+
+.stButton > button {
+    border-radius: 10px;
+    border: none;
+    background:
+        linear-gradient(
+            90deg,
+            var(--primary-color),
+            #3b82f6
+        );
+    color: #ffffff;
+    font-weight: 700;
+    padding-left: 20px;
+    padding-right: 20px;
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+
+.stButton > button:hover {
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow:
+        0 5px 14px rgba(37, 99, 235, 0.24);
+}
+
+
+/* --------------------------------------------------
+   Streamlit 提示框
+   -------------------------------------------------- */
+
+[data-testid="stAlert"] {
+    border-radius: 14px;
+    border-width: 1px;
+}
+
+
+/* --------------------------------------------------
+   Plotly 圖表外框
+   修正圖表底部白色區塊與邊界覆蓋
+   -------------------------------------------------- */
+
+[data-testid="stPlotlyChart"] {
+    width: 100%;
+    box-sizing: border-box;
+
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+
+    padding: 0;
+    margin-top: 8px;
+    margin-bottom: 22px;
+
+    overflow: hidden;
+
+    box-shadow: var(--card-shadow);
+}
+
+
+/* Plotly 內層容器 */
+
+[data-testid="stPlotlyChart"] > div {
+    width: 100%;
+    overflow: hidden;
+    border-radius: 16px;
+}
+
+
+/* Plotly iframe */
+
+[data-testid="stPlotlyChart"] iframe {
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 16px;
+    margin: 0;
+    padding: 0;
+}
+
+
+/* 避免 Streamlit 元素容器裁切圖表 */
+
+[data-testid="stElementContainer"]:has(
+    [data-testid="stPlotlyChart"]
+) {
+    overflow: visible;
+    padding-bottom: 4px;
+}
+
+
+/* --------------------------------------------------
+   頁尾
+   -------------------------------------------------- */
+
+.ai-footer {
+    color: #8190a5;
+    font-size: 0.82rem;
+    text-align: center;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+
+/* --------------------------------------------------
+   手機與窄螢幕
+   -------------------------------------------------- */
+
+@media screen and (max-width: 768px) {
+
+    [data-testid="stMainBlockContainer"] {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .ai-hero {
+        padding: 24px 20px;
+        border-radius: 16px;
+    }
+
+    .ai-hero-title {
+        font-size: 1.5rem;
+    }
+
+    .ai-hero-subtitle {
+        font-size: 0.92rem;
+    }
+
+    div[data-testid="stMetric"] {
+        padding: 14px 15px;
+    }
+}
+/* --------------------------------------------------
+   首頁排行榜日期卡片
+   -------------------------------------------------- */
+
+.ranking-date-card {
+    display: grid;
+    grid-template-columns:
+        minmax(160px, 0.8fr)
+        minmax(220px, 1fr)
+        minmax(320px, 2fr);
+    align-items: center;
+    column-gap: 24px;
+    padding: 20px 26px;
+    margin-top: 4px;
+    margin-bottom: 18px;
+}
+
+
+.ranking-date-label {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+
+.ranking-date-value {
+    color: var(--primary-dark);
+    font-size: 1.85rem;
+    font-weight: 850;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+
+.ranking-date-note {
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    line-height: 1.6;
+    text-align: right;
+}
+
+
+/* 手機版日期卡片 */
+
+@media screen and (max-width: 768px) {
+
+    .ranking-date-card {
+        display: block;
+        padding: 18px 20px;
+    }
+
+    .ranking-date-label {
+        margin-bottom: 8px;
+    }
+
+    .ranking-date-value {
+        font-size: 1.55rem;
+        margin-bottom: 8px;
+    }
+
+    .ranking-date-note {
+        text-align: left;
+    }
+}
+/* --------------------------------------------------
+   首頁四個等尺寸 KPI 卡片
+   -------------------------------------------------- */
+
+.equal-kpi-card {
+    width: 100%;
+    min-height: 190px;
+    height: 190px;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+
+    box-sizing: border-box;
+    padding: 22px 22px;
+
+    background:
+        linear-gradient(
+            145deg,
+            #ffffff 0%,
+            #f8fbff 100%
+        );
+
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+
+    box-shadow:
+        0 5px 18px rgba(30, 64, 175, 0.09);
+
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+
+.equal-kpi-card:hover {
+    transform: translateY(-3px);
+
+    box-shadow:
+        0 10px 26px rgba(30, 64, 175, 0.15);
+}
+
+
+.equal-kpi-label {
+    min-height: 26px;
+
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 700;
+
+    white-space: nowrap;
+}
+
+
+.equal-kpi-value {
+    min-height: 58px;
+
+    display: flex;
+    align-items: center;
+
+    color: var(--text-primary);
+    font-size: 2.25rem;
+    font-weight: 850;
+    line-height: 1.15;
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+
+.equal-kpi-stock-name {
+    font-size: 2rem;
+}
+
+
+.equal-kpi-note {
+    min-height: 24px;
+
+    color: #18864b;
+    font-size: 0.9rem;
+    font-weight: 650;
+    line-height: 1.4;
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+
+/* --------------------------------------------------
+   KPI 手機與窄螢幕顯示
+   -------------------------------------------------- */
+
+@media screen and (max-width: 768px) {
+
+    .equal-kpi-card {
+        min-height: 160px;
+        height: 160px;
+        padding: 18px 18px;
+        margin-bottom: 12px;
+    }
+
+    .equal-kpi-value {
+        font-size: 1.85rem;
+    }
+
+    .equal-kpi-stock-name {
+        font-size: 1.65rem;
+    }
+
+    .equal-kpi-note {
+        white-space: normal;
+    }
+}

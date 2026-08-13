@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -6,798 +7,506 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RESULT_DIR = PROJECT_ROOT / "results"
+# ==================================================
+# 專案路徑與頁面設定
+# ==================================================
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.ui import load_global_css, render_footer, render_sidebar_info  # noqa: E402
+
+RESULT_DIR = PROJECT_ROOT / "results"
 
 st.set_page_config(
     page_title="模型回測",
     page_icon="🧪",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+load_global_css()
+render_sidebar_info()
 
-# --------------------------------------------------
-# 資料載入函式
-# --------------------------------------------------
+
+# ==================================================
+# 常數與顯示名稱
+# ==================================================
+
+MODEL_NAME_MAP = {
+    "Logistic Regression": "Logistic Regression（邏輯斯迴歸）",
+    "Random Forest": "Random Forest（隨機森林）",
+    "XGBoost": "XGBoost（極限梯度提升）",
+}
+
+MODEL_COLORS = {
+    "Logistic Regression": "#2563eb",
+    "Random Forest": "#16a34a",
+    "XGBoost": "#dc2626",
+}
+
+PLOT_FONT = "Microsoft JhengHei, Noto Sans TC, Arial"
+
+
+# ==================================================
+# 資料載入
+# ==================================================
 
 @st.cache_data(ttl=300)
-def load_csv_file(file_name):
-
-    file_path = RESULT_DIR / file_name
-
-    if not file_path.exists():
+def load_csv(file_name):
+    path = RESULT_DIR / file_name
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except (OSError, UnicodeDecodeError, pd.errors.ParserError):
         return pd.DataFrame()
 
-    return pd.read_csv(file_path)
-
 
 @st.cache_data(ttl=300)
-def load_backtest_data():
+def load_first_available(file_names):
+    for file_name in file_names:
+        dataframe = load_csv(file_name)
+        if not dataframe.empty:
+            return dataframe, file_name
+    return pd.DataFrame(), None
 
-    top5_df = load_csv_file(
-        "top5_portfolio_backtest.csv"
+
+def prepare_date(dataframe):
+    output = dataframe.copy()
+    date_column = next(
+        (column for column in ["date", "Date", "日期", "rebalance_date"] if column in output.columns),
+        None,
     )
-
-    benchmark_df = load_csv_file(
-        "equal_weight_benchmark.csv"
-    )
-
-    kpi_df = load_csv_file(
-        "portfolio_kpis.csv"
-    )
-
-    fold_df = load_csv_file(
-        "fold_backtest_results.csv"
-    )
-
-    cv_df = load_csv_file(
-        "timeseries_cv_results.csv"
-    )
-
-    for dataframe in [
-        top5_df,
-        benchmark_df,
-        fold_df,
-        cv_df,
-    ]:
-        for date_column in [
-            "date",
-            "Start_Date",
-            "End_Date",
-            "ValidStart",
-            "ValidEnd",
-            "TrainStart",
-            "TrainEnd",
-        ]:
-            if (
-                not dataframe.empty
-                and date_column in dataframe.columns
-            ):
-                dataframe[date_column] = pd.to_datetime(
-                    dataframe[date_column],
-                    errors="coerce",
-                )
-
-    return (
-        top5_df,
-        benchmark_df,
-        kpi_df,
-        fold_df,
-        cv_df,
-    )
+    if date_column is None:
+        return output
+    if date_column != "date":
+        output = output.rename(columns={date_column: "date"})
+    output["date"] = pd.to_datetime(output["date"], errors="coerce")
+    return output.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
 
-(
-    top5_df,
-    benchmark_df,
-    kpi_df,
-    fold_df,
-    cv_df,
-) = load_backtest_data()
+def numeric(dataframe, columns):
+    output = dataframe.copy()
+    for column in columns:
+        if column in output.columns:
+            output[column] = pd.to_numeric(output[column], errors="coerce")
+    return output
 
 
-# --------------------------------------------------
-# 頁面標題
-# --------------------------------------------------
-
-st.title("AI Top 5 策略回測")
-
-st.caption(
-    "使用 TimeSeriesSplit 產生樣本外預測，"
-    "每 5 個交易日重新選取 AI 分數最高的 5 檔股票，"
-    "並與同期可用股票等權基準進行比較。"
-)
+def add_drawdown(dataframe):
+    output = dataframe.copy()
+    if "Net_Equity" not in output.columns:
+        output["Drawdown"] = np.nan
+        return output
+    output["Net_Equity"] = pd.to_numeric(output["Net_Equity"], errors="coerce")
+    running_max = output["Net_Equity"].cummax()
+    output["Drawdown"] = output["Net_Equity"] / running_max - 1
+    return output
 
 
-# --------------------------------------------------
-# 檔案完整性檢查
-# --------------------------------------------------
-
-missing_files = []
-
-if top5_df.empty:
-    missing_files.append(
-        "top5_portfolio_backtest.csv"
-    )
-
-if benchmark_df.empty:
-    missing_files.append(
-        "equal_weight_benchmark.csv"
-    )
-
-if kpi_df.empty:
-    missing_files.append(
-        "portfolio_kpis.csv"
-    )
+def row_value(row, column, default=np.nan):
+    if row is None or column not in row.index:
+        return default
+    value = pd.to_numeric(row[column], errors="coerce")
+    return default if pd.isna(value) else float(value)
 
 
-if missing_files:
+# 原有 XGBoost 策略回測資料
+top5_df = prepare_date(load_csv("top5_portfolio_backtest.csv"))
+benchmark_df = prepare_date(load_csv("equal_weight_benchmark.csv"))
+kpi_df = load_csv("portfolio_kpis.csv")
+fold_df, fold_file_name = load_first_available([
+    "fold_backtest_results.csv",
+    "fold_backtest_performance.csv",
+    "fold_performance.csv",
+])
 
-    st.error(
-        "缺少以下回測檔案："
-        + "、".join(missing_files)
-    )
+# 新增的多模型比較資料
+comparison_df = load_csv("model_comparison_metrics.csv")
+model_fold_df = load_csv("model_fold_metrics.csv")
+portfolio_df = load_csv("model_portfolio_comparison.csv")
+equity_df = prepare_date(load_csv("model_equity_curves.csv"))
 
-    st.info(
-        "請確認 Colab 的 results 資料夾已完整複製到 "
-        "VS Code 專案的 results 資料夾。"
-    )
-
-    st.stop()
-
-
-# --------------------------------------------------
-# 數值格式整理
-# --------------------------------------------------
-
-numeric_kpi_columns = [
-    "累積報酬",
-    "年化報酬",
-    "年化波動率",
-    "最大回撤",
-    "Sharpe_Ratio",
-    "每期勝率",
-    "每期虧損率",
-    "平均每期成本後報酬",
-    "每期報酬中位數",
-    "最佳一期",
-    "最差一期",
+kpi_numeric_columns = [
+    "回測期數", "累積報酬", "年化報酬", "年化波動率", "最大回撤",
+    "Sharpe_Ratio", "每期勝率", "平均每期成本後報酬", "每期報酬中位數",
+    "最佳一期", "最差一期",
 ]
-
-
-for column in numeric_kpi_columns:
-
-    if column in kpi_df.columns:
-        kpi_df[column] = pd.to_numeric(
-            kpi_df[column],
-            errors="coerce",
-        )
-
-
-# 取得策略與基準資料
-top5_kpi = kpi_df[
-    kpi_df["策略"] == "AI Top 5"
-]
-
-benchmark_kpi = kpi_df[
-    kpi_df["策略"] != "AI Top 5"
-]
-
-
-if top5_kpi.empty:
-    st.error(
-        "portfolio_kpis.csv 中找不到 AI Top 5。"
-    )
-    st.stop()
-
-
-top5_kpi = top5_kpi.iloc[0]
-
-
-if not benchmark_kpi.empty:
-    benchmark_kpi = benchmark_kpi.iloc[0]
-else:
-    benchmark_kpi = None
-
-
-# --------------------------------------------------
-# 回測設定
-# --------------------------------------------------
-
-st.subheader("回測設定")
-
-
-setting_col1, setting_col2, setting_col3, setting_col4 = (
-    st.columns(4)
-)
-
-
-setting_col1.metric(
-    "選股範圍",
-    "85 檔",
-)
-
-setting_col2.metric(
-    "持股數量",
-    "Top 5",
-)
-
-setting_col3.metric(
-    "重新平衡週期",
-    "每 5 個交易日",
-)
-
-setting_col4.metric(
-    "完整交易成本",
-    "0.60%",
-)
-
-
-st.caption(
-    "五檔股票採等權配置，回測使用 TimeSeriesSplit "
-    "產生的 OOF 樣本外預測，降低資料洩漏風險。"
-)
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# 重要 KPI
-# --------------------------------------------------
-
-st.subheader("AI Top 5 績效摘要")
-
-
-kpi_col1, kpi_col2, kpi_col3, kpi_col4 = (
-    st.columns(4)
-)
-
-
-kpi_col1.metric(
-    "累積報酬",
-    f'{top5_kpi["累積報酬"]:.2%}',
-    (
-        f'{top5_kpi["累積報酬"] - benchmark_kpi["累積報酬"]:+.2%}'
-        if benchmark_kpi is not None
-        else None
-    ),
-)
-
-
-kpi_col2.metric(
-    "年化報酬",
-    f'{top5_kpi["年化報酬"]:.2%}',
-    (
-        f'{top5_kpi["年化報酬"] - benchmark_kpi["年化報酬"]:+.2%}'
-        if benchmark_kpi is not None
-        else None
-    ),
-)
-
-
-kpi_col3.metric(
-    "Sharpe Ratio",
-    f'{top5_kpi["Sharpe_Ratio"]:.3f}',
-    (
-        f'{top5_kpi["Sharpe_Ratio"] - benchmark_kpi["Sharpe_Ratio"]:+.3f}'
-        if benchmark_kpi is not None
-        else None
-    ),
-)
-
-
-kpi_col4.metric(
-    "最大回撤",
-    f'{top5_kpi["最大回撤"]:.2%}',
-    (
-        f'{top5_kpi["最大回撤"] - benchmark_kpi["最大回撤"]:+.2%}'
-        if benchmark_kpi is not None
-        else None
-    ),
-    delta_color="inverse",
-)
-
-
-second_col1, second_col2, second_col3, second_col4 = (
-    st.columns(4)
-)
-
-
-second_col1.metric(
-    "每期勝率",
-    f'{top5_kpi["每期勝率"]:.2%}',
-)
-
-
-second_col2.metric(
-    "平均每期淨報酬",
-    f'{top5_kpi["平均每期成本後報酬"]:.2%}',
-)
-
-
-second_col3.metric(
-    "報酬中位數",
-    f'{top5_kpi["每期報酬中位數"]:.2%}',
-)
-
-
-second_col4.metric(
-    "回測期數",
-    int(top5_kpi["回測期數"]),
-)
-
-
-st.warning(
-    "AI Top 5 的歷史報酬雖高於等權基準，"
-    "但最大回撤超過 50%，代表策略仍具有高度波動與集中風險。"
-)
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# 資產曲線
-# --------------------------------------------------
-
-st.subheader("累積資產曲線")
-
-
-if "date" in top5_df.columns:
-    top5_df["date"] = pd.to_datetime(
-        top5_df["date"],
-        errors="coerce",
-    )
-
-if "date" in benchmark_df.columns:
-    benchmark_df["date"] = pd.to_datetime(
-        benchmark_df["date"],
-        errors="coerce",
-    )
-
-
-equity_figure = go.Figure()
-
-
-if (
-    "date" in top5_df.columns
-    and "Net_Equity" in top5_df.columns
-):
-
-    equity_figure.add_trace(
-        go.Scatter(
-            x=top5_df["date"],
-            y=top5_df["Net_Equity"],
-            mode="lines",
-            name="AI Top 5",
-            line=dict(
-                width=3,
-                color="#E74C3C",
-            ),
-        )
-    )
-
-
-if (
-    "date" in benchmark_df.columns
-    and "Net_Equity" in benchmark_df.columns
-):
-
-    equity_figure.add_trace(
-        go.Scatter(
-            x=benchmark_df["date"],
-            y=benchmark_df["Net_Equity"],
-            mode="lines",
-            name="等權基準",
-            line=dict(
-                width=3,
-                color="#3498DB",
-            ),
-        )
-    )
-
-
-equity_figure.update_layout(
-    height=600,
-    hovermode="x unified",
-    xaxis_title="日期",
-    yaxis_title="累積資產倍數",
-    legend_title="策略",
-)
-
-
-st.plotly_chart(
-    equity_figure,
-    use_container_width=True,
-)
-
-
-st.caption(
-    "資產曲線初始值為 1。"
-    "例如資產值 3.60 代表累積報酬約為 260%。"
-)
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# 最大回撤曲線
-# --------------------------------------------------
-
-st.subheader("策略回撤")
-
-
-def add_drawdown_column(dataframe):
-
-    result = dataframe.copy()
-
-    if "Net_Equity" not in result.columns:
-        return result
-
-    result["Running_Max"] = (
-        result["Net_Equity"].cummax()
-    )
-
-    result["Drawdown"] = (
-        result["Net_Equity"]
-        / result["Running_Max"]
-        - 1
-    )
-
-    return result
-
-
-top5_drawdown_df = add_drawdown_column(
-    top5_df
-)
-
-benchmark_drawdown_df = add_drawdown_column(
-    benchmark_df
-)
-
-
-drawdown_figure = go.Figure()
-
-
-if (
-    "date" in top5_drawdown_df.columns
-    and "Drawdown" in top5_drawdown_df.columns
-):
-
-    drawdown_figure.add_trace(
-        go.Scatter(
-            x=top5_drawdown_df["date"],
-            y=top5_drawdown_df["Drawdown"],
-            mode="lines",
-            name="AI Top 5",
-            fill="tozeroy",
-            line=dict(
-                color="#E74C3C",
-            ),
-        )
-    )
-
-
-if (
-    "date" in benchmark_drawdown_df.columns
-    and "Drawdown" in benchmark_drawdown_df.columns
-):
-
-    drawdown_figure.add_trace(
-        go.Scatter(
-            x=benchmark_drawdown_df["date"],
-            y=benchmark_drawdown_df["Drawdown"],
-            mode="lines",
-            name="等權基準",
-            line=dict(
-                color="#3498DB",
-            ),
-        )
-    )
-
-
-drawdown_figure.update_layout(
-    height=500,
-    hovermode="x unified",
-    xaxis_title="日期",
-    yaxis_title="回撤幅度",
-    yaxis_tickformat=".0%",
-    legend_title="策略",
-)
-
-
-st.plotly_chart(
-    drawdown_figure,
-    use_container_width=True,
-)
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# 策略與基準 KPI 比較
-# --------------------------------------------------
-
-st.subheader("策略與基準完整比較")
-
-
-kpi_display_columns = [
-    column
-    for column in [
-        "策略",
-        "回測期數",
-        "累積報酬",
-        "年化報酬",
-        "年化波動率",
-        "最大回撤",
-        "Sharpe_Ratio",
-        "每期勝率",
-        "平均每期成本後報酬",
-        "每期報酬中位數",
-        "最佳一期",
-        "最差一期",
-    ]
-    if column in kpi_df.columns
-]
-
-
-kpi_column_config = {}
-
-
-for percentage_column in [
-    "累積報酬",
-    "年化報酬",
-    "年化波動率",
-    "最大回撤",
-    "每期勝率",
-    "平均每期成本後報酬",
-    "每期報酬中位數",
-    "最佳一期",
-    "最差一期",
-]:
-
-    if percentage_column in kpi_display_columns:
-        kpi_column_config[
-            percentage_column
-        ] = st.column_config.NumberColumn(
-            percentage_column,
-            format="%.2f%%",
-        )
-
-
-if "Sharpe_Ratio" in kpi_display_columns:
-    kpi_column_config[
-        "Sharpe_Ratio"
-    ] = st.column_config.NumberColumn(
-        "Sharpe Ratio",
-        format="%.3f",
-    )
-
-
-st.dataframe(
-    kpi_df[kpi_display_columns],
-    use_container_width=True,
-    hide_index=True,
-    column_config=kpi_column_config,
-)
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# TimeSeriesSplit 分折績效
-# --------------------------------------------------
-
-st.subheader("TimeSeriesSplit 分期回測")
-
-
-if fold_df.empty:
-
-    st.info(
-        "目前沒有 fold_backtest_results.csv，"
-        "無法顯示分期策略績效。"
-    )
-
-else:
-
-    fold_display_df = fold_df.copy()
-
-    fold_display_columns = [
-        column
-        for column in [
-            "Fold",
-            "Start_Date",
-            "End_Date",
-            "Periods",
-            "Top5_Total_Return",
-            "Benchmark_Total_Return",
-            "Average_Excess_Return",
-            "Top5_Max_Drawdown",
-            "Benchmark_Max_Drawdown",
-            "Top5_Sharpe",
-            "Benchmark_Sharpe",
-        ]
-        if column in fold_display_df.columns
-    ]
-
-
-    fold_column_config = {}
-
-
-    for percentage_column in [
-        "Top5_Total_Return",
-        "Benchmark_Total_Return",
-        "Average_Excess_Return",
-        "Top5_Max_Drawdown",
-        "Benchmark_Max_Drawdown",
-    ]:
-
-        if percentage_column in fold_display_columns:
-
-            fold_column_config[
-                percentage_column
-            ] = st.column_config.NumberColumn(
-                percentage_column,
-                format="%.2f%%",
-            )
-
-
-    if "Start_Date" in fold_display_columns:
-        fold_column_config[
-            "Start_Date"
-        ] = st.column_config.DateColumn(
-            "開始日期",
-            format="YYYY-MM-DD",
-        )
-
-
-    if "End_Date" in fold_display_columns:
-        fold_column_config[
-            "End_Date"
-        ] = st.column_config.DateColumn(
-            "結束日期",
-            format="YYYY-MM-DD",
-        )
-
-
-    st.dataframe(
-        fold_display_df[
-            fold_display_columns
-        ],
-        use_container_width=True,
-        hide_index=True,
-        column_config=fold_column_config,
-    )
-
-
-    if "Average_Excess_Return" in fold_df.columns:
-
-        positive_fold_count = int(
-            (
-                fold_df[
-                    "Average_Excess_Return"
-                ] > 0
-            ).sum()
-        )
-
-        total_fold_count = len(fold_df)
-
-        st.success(
-            f"{positive_fold_count} / "
-            f"{total_fold_count} 個 Fold "
-            "的平均超額報酬為正。"
-        )
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# 模型分類績效
-# --------------------------------------------------
-
-st.subheader("XGBoost 五折分類績效")
-
-
-if cv_df.empty:
-
-    st.info(
-        "目前沒有 timeseries_cv_results.csv，"
-        "無法顯示模型五折分類績效。"
-    )
-
-else:
-
-    cv_display_columns = [
-        column
-        for column in [
-            "Fold",
-            "ValidStart",
-            "ValidEnd",
-            "Accuracy",
-            "Precision",
-            "Recall",
-            "F1",
-            "ROC_AUC",
-        ]
-        if column in cv_df.columns
-    ]
-
-
-    st.dataframe(
-        cv_df[cv_display_columns],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Accuracy": st.column_config.NumberColumn(
-                "Accuracy",
-                format="%.4f",
-            ),
-            "Precision": st.column_config.NumberColumn(
-                "Precision",
-                format="%.4f",
-            ),
-            "Recall": st.column_config.NumberColumn(
-                "Recall",
-                format="%.4f",
-            ),
-            "F1": st.column_config.NumberColumn(
-                "F1",
-                format="%.4f",
-            ),
-            "ROC_AUC": st.column_config.NumberColumn(
-                "ROC-AUC",
-                format="%.4f",
-            ),
-        },
-    )
-
-
-    if "ROC_AUC" in cv_df.columns:
-
-        average_auc = cv_df["ROC_AUC"].mean()
-        auc_std = cv_df["ROC_AUC"].std()
-
-        auc_col1, auc_col2 = st.columns(2)
-
-        auc_col1.metric(
-            "五折平均 ROC-AUC",
-            f"{average_auc:.4f}",
-        )
-
-        auc_col2.metric(
-            "ROC-AUC 標準差",
-            f"{auc_std:.4f}",
-        )
-
-
-st.divider()
-
-
-# --------------------------------------------------
-# 結果說明
-# --------------------------------------------------
-
-st.subheader("回測結果解讀")
-
-
-st.markdown(
+kpi_df = numeric(kpi_df, kpi_numeric_columns)
+
+comparison_df = numeric(comparison_df, [
+    "Mean_ROC_AUC", "Std_ROC_AUC", "Overall_OOF_ROC_AUC", "Accuracy",
+    "Precision", "Recall", "F1", "Mean_Training_Seconds", "Sample_Count",
+])
+model_fold_df = numeric(model_fold_df, ["Fold", "ROC_AUC", "Accuracy", "Precision", "Recall", "F1", "Seconds"])
+portfolio_df = numeric(portfolio_df, [
+    "Backtest_Periods", "Cumulative_Return", "Annual_Return", "Annual_Volatility",
+    "Sharpe_Ratio", "Max_Drawdown", "Win_Rate", "Mean_Net_Return",
+    "Median_Net_Return", "Best_Period", "Worst_Period",
+])
+equity_df = numeric(equity_df, ["Net_Equity", "Drawdown", "Net_Return"])
+
+
+# ==================================================
+# 顯示工具
+# ==================================================
+
+def fmt_pct(value, digits=2):
+    return "資料不足" if pd.isna(value) else f"{value:.{digits}%}"
+
+
+def fmt_num(value, digits=3):
+    return "資料不足" if pd.isna(value) else f"{value:.{digits}f}"
+
+
+def fmt_int(value):
+    return "資料不足" if pd.isna(value) else f"{int(value):,}"
+
+
+def card(label, value, note, color="#2563eb", value_color="#172033"):
+    return f"""
+    <div style="height:180px;box-sizing:border-box;padding:21px;display:flex;
+         flex-direction:column;justify-content:space-between;background:linear-gradient(145deg,#fff,#f8fbff);
+         border:1px solid #dce5ef;border-top:4px solid {color};border-radius:16px;
+         box-shadow:0 5px 18px rgba(30,64,175,.09);">
+      <div style="color:#5f6f85;font-size:.96rem;font-weight:700;">{label}</div>
+      <div style="color:{value_color};font-size:1.9rem;font-weight:850;line-height:1.15;">{value}</div>
+      <div style="color:#66768b;font-size:.84rem;font-weight:600;line-height:1.45;">{note}</div>
+    </div>
     """
-- AI Top 5 的累積報酬與 Sharpe Ratio 高於等權基準，代表模型具有初步選股排序價值。
-- 五個 TimeSeriesSplit 驗證期間的平均超額報酬皆為正，但部分期間的策略絕對報酬仍為負。
-- 策略最大回撤超過 50%，顯示集中持有五檔股票仍有明顯下行風險。
-- 回測已扣除每次完整買進與賣出的簡化交易成本 0.6%。
-- 歷史回測結果不代表未來績效，模型分數也不代表保證上漲機率。
-"""
-)
 
 
-st.warning(
-    "本頁僅供課程研究、模型驗證與歷史策略分析，"
-    "不構成任何投資建議。"
-)
+def setting_card(label, value, color):
+    return f"""
+    <div style="height:135px;box-sizing:border-box;padding:20px;display:flex;flex-direction:column;
+         justify-content:space-between;background:#fff;border:1px solid #dce5ef;
+         border-left:5px solid {color};border-radius:14px;box-shadow:0 4px 14px rgba(30,64,175,.07);">
+      <div style="color:#5f6f85;font-size:.92rem;font-weight:700;">{label}</div>
+      <div style="color:#172033;font-size:1.5rem;font-weight:850;">{value}</div>
+    </div>
+    """
+
+
+def style_figure(figure, title, y_title, height=560, percent_axis=False):
+    figure.update_layout(
+        height=height,
+        margin={"l": 45, "r": 35, "t": 75, "b": 85},
+        title={"text": title, "x": 0.02, "font": {"size": 20, "color": "#172033"}},
+        hovermode="x unified",
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font={"family": PLOT_FONT, "color": "#172033", "size": 14},
+        xaxis={"automargin": True, "showgrid": False},
+        yaxis={
+            "automargin": True,
+            "title": {"text": y_title, "standoff": 18},
+            "showgrid": True,
+            "gridcolor": "#edf2f7",
+            "zeroline": True,
+            "zerolinecolor": "#94a3b8",
+            **({"tickformat": ".0%"} if percent_axis else {}),
+        },
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    )
+    return figure
+
+
+# ==================================================
+# 頁面 Hero 與分頁
+# ==================================================
+
+st.html("""
+<div class="ai-hero">
+  <div class="ai-hero-title">AI Top 5 量化回測與多模型比較</div>
+  <div class="ai-hero-subtitle">
+    使用相同的 85 檔股票、32 個特徵、五日 Target、TimeSeriesSplit 五折、
+    gap = 5、OOF 預測與完整交易成本，比較正式 XGBoost 策略及其他模型。
+  </div>
+  <div style="margin-top:18px;">
+    <span class="ai-badge ai-badge-blue">TimeSeriesSplit</span>
+    <span class="ai-badge ai-badge-green">OOF 樣本外預測</span>
+    <span class="ai-badge ai-badge-purple">三模型公平比較</span>
+    <span class="ai-badge ai-badge-orange">完整成本 0.60%</span>
+  </div>
+</div>
+""")
+
+xgb_tab, comparison_tab = st.tabs([
+    "📈 XGBoost 策略回測",
+    "⚖️ 多模型公平比較",
+])
+
+
+# ==================================================
+# 分頁一：XGBoost 策略回測
+# ==================================================
+
+with xgb_tab:
+    required_original = {
+        "top5_portfolio_backtest.csv": top5_df,
+        "equal_weight_benchmark.csv": benchmark_df,
+        "portfolio_kpis.csv": kpi_df,
+    }
+    missing_original = [name for name, dataframe in required_original.items() if dataframe.empty]
+
+    if missing_original:
+        st.error(f"缺少原有回測檔案：{missing_original}")
+    elif "策略" not in kpi_df.columns:
+        st.error("portfolio_kpis.csv 缺少『策略』欄位。")
+    else:
+        top5_rows = kpi_df[kpi_df["策略"] == "AI Top 5"]
+        benchmark_rows = kpi_df[kpi_df["策略"] != "AI Top 5"]
+
+        if top5_rows.empty:
+            st.error("portfolio_kpis.csv 中找不到 AI Top 5。")
+        else:
+            top5_kpi = top5_rows.iloc[0]
+            benchmark_kpi = benchmark_rows.iloc[0] if not benchmark_rows.empty else None
+
+            st.subheader("回測設定")
+            cols = st.columns(4, gap="medium")
+            settings = [
+                ("選股範圍", "85 檔股票", "#2563eb"),
+                ("持股數量", "AI Top 5", "#6d28d9"),
+                ("重新平衡週期", "每 5 個交易日", "#0891b2"),
+                ("完整交易成本", "0.60%", "#d97706"),
+            ]
+            for column, (label, value, color) in zip(cols, settings):
+                with column:
+                    st.html(setting_card(label, value, color))
+
+            st.caption("回測使用 TimeSeriesSplit 產生的 OOF 樣本外預測，五檔等權配置。")
+            st.divider()
+
+            values = {
+                "累積報酬": row_value(top5_kpi, "累積報酬"),
+                "年化報酬": row_value(top5_kpi, "年化報酬"),
+                "Sharpe Ratio": row_value(top5_kpi, "Sharpe_Ratio"),
+                "最大回撤": row_value(top5_kpi, "最大回撤"),
+                "每期勝率": row_value(top5_kpi, "每期勝率"),
+                "平均每期淨報酬": row_value(top5_kpi, "平均每期成本後報酬"),
+                "每期報酬中位數": row_value(top5_kpi, "每期報酬中位數"),
+                "回測期數": row_value(top5_kpi, "回測期數"),
+            }
+
+            st.subheader("AI Top 5 績效摘要")
+            first = st.columns(4, gap="medium")
+            second = st.columns(4, gap="medium")
+            first_cards = [
+                ("累積報酬", fmt_pct(values["累積報酬"]), "複利累積成果", "#10b981", "#047857"),
+                ("年化報酬", fmt_pct(values["年化報酬"]), "依回測期間年化", "#2563eb", "#1d4ed8"),
+                ("Sharpe Ratio", fmt_num(values["Sharpe Ratio"]), "風險調整後報酬", "#0891b2", "#172033"),
+                ("最大回撤", fmt_pct(values["最大回撤"]), "相對歷史高點最大跌幅", "#dc2626", "#b91c1c"),
+            ]
+            second_cards = [
+                ("每期勝率", fmt_pct(values["每期勝率"]), "淨報酬大於 0 的比例", "#6d28d9", "#172033"),
+                ("平均每期淨報酬", fmt_pct(values["平均每期淨報酬"]), "每個五交易日週期", "#10b981", "#172033"),
+                ("每期報酬中位數", fmt_pct(values["每期報酬中位數"]), "降低極端值影響", "#f59e0b", "#172033"),
+                ("回測期數", fmt_int(values["回測期數"]), "每期為 5 個交易日", "#64748b", "#172033"),
+            ]
+            for column, item in zip(first, first_cards):
+                with column:
+                    st.html(card(*item))
+            for column, item in zip(second, second_cards):
+                with column:
+                    st.html(card(*item))
+
+            st.warning("歷史績效不代表未來結果，集中持有五檔股票仍具有顯著下行風險。")
+            st.divider()
+
+            st.subheader("累積資產曲線")
+            figure = go.Figure()
+            if {"date", "Net_Equity"}.issubset(top5_df.columns):
+                figure.add_trace(go.Scatter(
+                    x=top5_df["date"], y=top5_df["Net_Equity"], name="AI Top 5",
+                    mode="lines", line={"color": "#dc2626", "width": 3},
+                    hovertemplate="日期：%{x|%Y-%m-%d}<br>累積資產：%{y:.4f}<extra></extra>",
+                ))
+            if {"date", "Net_Equity"}.issubset(benchmark_df.columns):
+                figure.add_trace(go.Scatter(
+                    x=benchmark_df["date"], y=benchmark_df["Net_Equity"], name="等權基準",
+                    mode="lines", line={"color": "#2563eb", "width": 2.5},
+                    hovertemplate="日期：%{x|%Y-%m-%d}<br>累積資產：%{y:.4f}<extra></extra>",
+                ))
+            st.plotly_chart(style_figure(figure, "AI Top 5 與等權基準累積資產", "累積資產倍數", 630), use_container_width=True)
+            st.divider()
+
+            st.subheader("策略回撤與下行風險")
+            figure = go.Figure()
+            top5_drawdown = add_drawdown(top5_df)
+            benchmark_drawdown = add_drawdown(benchmark_df)
+            if {"date", "Drawdown"}.issubset(top5_drawdown.columns):
+                figure.add_trace(go.Scatter(
+                    x=top5_drawdown["date"], y=top5_drawdown["Drawdown"], name="AI Top 5",
+                    mode="lines", fill="tozeroy", line={"color": "#dc2626", "width": 2.5},
+                    fillcolor="rgba(220,38,38,.12)",
+                    hovertemplate="日期：%{x|%Y-%m-%d}<br>回撤：%{y:.2%}<extra></extra>",
+                ))
+            if {"date", "Drawdown"}.issubset(benchmark_drawdown.columns):
+                figure.add_trace(go.Scatter(
+                    x=benchmark_drawdown["date"], y=benchmark_drawdown["Drawdown"], name="等權基準",
+                    mode="lines", line={"color": "#2563eb", "width": 2},
+                    hovertemplate="日期：%{x|%Y-%m-%d}<br>回撤：%{y:.2%}<extra></extra>",
+                ))
+            st.plotly_chart(style_figure(figure, "AI Top 5 與等權基準回撤曲線", "相對歷史高點跌幅", 560, True), use_container_width=True)
+            st.divider()
+
+            st.subheader("策略與基準完整比較")
+            display_columns = [column for column in kpi_numeric_columns if column in kpi_df.columns]
+            if "策略" in kpi_df.columns:
+                display_columns.insert(0, "策略")
+            st.dataframe(kpi_df[display_columns], use_container_width=True, hide_index=True)
+
+            if not fold_df.empty:
+                st.divider()
+                st.subheader("TimeSeriesSplit 分期回測")
+                st.caption(f"資料來源：{fold_file_name}")
+                st.dataframe(fold_df, use_container_width=True, hide_index=True)
+
+
+# ==================================================
+# 分頁二：多模型公平比較
+# ==================================================
+
+with comparison_tab:
+    required_comparison = {
+        "model_comparison_metrics.csv": comparison_df,
+        "model_fold_metrics.csv": model_fold_df,
+        "model_portfolio_comparison.csv": portfolio_df,
+        "model_equity_curves.csv": equity_df,
+    }
+    missing_comparison = [name for name, dataframe in required_comparison.items() if dataframe.empty]
+
+    if missing_comparison:
+        st.error(f"缺少多模型比較檔案：{missing_comparison}")
+    else:
+        st.info(
+            "本比較使用相同的 85 檔股票、32 個特徵、五日 Target、TimeSeriesSplit 五折、"
+            "gap = 5、OOF 預測、Top 5 等權配置與完整交易成本 0.60%。"
+            "目前每日排行榜與 SHAP 解釋仍使用正式 XGBoost 模型。"
+        )
+
+        for dataframe in [comparison_df, model_fold_df, portfolio_df, equity_df]:
+            if "Model" in dataframe.columns:
+                dataframe["模型"] = dataframe["Model"].map(MODEL_NAME_MAP).fillna(dataframe["Model"])
+
+    
+
+        st.divider()
+        st.subheader("五折平均 ROC-AUC 與穩定性")
+        roc_figure = go.Figure()
+        for model_name in MODEL_NAME_MAP:
+            data = model_fold_df[model_fold_df["Model"] == model_name].sort_values("Fold")
+            roc_figure.add_trace(go.Scatter(
+                x=data["Fold"], y=data["ROC_AUC"],
+                name=MODEL_NAME_MAP[model_name], mode="lines+markers",
+                line={"color": MODEL_COLORS[model_name], "width": 2.5}, marker={"size": 9},
+                hovertemplate="Fold %{x}<br>ROC-AUC：%{y:.4f}<extra></extra>",
+            ))
+        roc_figure.add_hline(y=0.5, line_dash="dash", line_color="#94a3b8", annotation_text="隨機分類基準 0.5")
+        roc_figure.update_xaxes(title="Fold", dtick=1)
+        st.plotly_chart(style_figure(roc_figure, "三模型各 Fold ROC-AUC", "ROC-AUC", 520), use_container_width=True)
+
+        classification_table = comparison_df[[
+            "模型", "Mean_ROC_AUC", "Std_ROC_AUC", "Overall_OOF_ROC_AUC",
+            "Accuracy", "Precision", "Recall", "F1", "Mean_Training_Seconds",
+        ]].rename(columns={
+            "Mean_ROC_AUC": "五折平均 ROC-AUC",
+            "Std_ROC_AUC": "ROC-AUC 標準差",
+            "Overall_OOF_ROC_AUC": "整體 OOF ROC-AUC",
+            "Accuracy": "準確率",
+            "Precision": "精確率",
+            "Recall": "召回率",
+            "F1": "F1 分數",
+            "Mean_Training_Seconds": "平均訓練秒數",
+        })
+        st.dataframe(classification_table, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.subheader("三模型 Top 5 投資組合績效")
+        best_portfolio = portfolio_df.loc[portfolio_df["Sharpe_Ratio"].idxmax()]
+        cols = st.columns(4, gap="medium")
+        portfolio_cards = [
+            ("最佳 Sharpe Ratio", MODEL_NAME_MAP.get(best_portfolio["Model"], best_portfolio["Model"]), fmt_num(best_portfolio["Sharpe_Ratio"], 3), "#6d28d9"),
+            ("累積報酬", fmt_pct(best_portfolio["Cumulative_Return"]), "最佳風險調整後模型", "#10b981"),
+            ("最大回撤", fmt_pct(best_portfolio["Max_Drawdown"]), "相對歷史高點最大跌幅", "#dc2626"),
+            ("平均每期淨報酬", fmt_pct(best_portfolio["Mean_Net_Return"]), "已扣除完整成本 0.60%", "#2563eb"),
+        ]
+        for column, item in zip(cols, portfolio_cards):
+            with column:
+                st.html(card(*item))
+
+        portfolio_table = portfolio_df[[
+            "模型", "Backtest_Periods", "Cumulative_Return", "Annual_Return",
+            "Annual_Volatility", "Sharpe_Ratio", "Max_Drawdown", "Win_Rate",
+            "Mean_Net_Return", "Median_Net_Return",
+        ]].rename(columns={
+            "Backtest_Periods": "回測期數",
+            "Cumulative_Return": "累積報酬",
+            "Annual_Return": "年化報酬",
+            "Annual_Volatility": "年化波動率",
+            "Sharpe_Ratio": "Sharpe Ratio",
+            "Max_Drawdown": "最大回撤",
+            "Win_Rate": "每期勝率",
+            "Mean_Net_Return": "平均每期淨報酬",
+            "Median_Net_Return": "每期淨報酬中位數",
+        })
+        st.dataframe(portfolio_table, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.subheader("三模型累積資產曲線")
+        equity_figure = go.Figure()
+        for model_name in MODEL_NAME_MAP:
+            data = equity_df[equity_df["Model"] == model_name].sort_values("date")
+            equity_figure.add_trace(go.Scatter(
+                x=data["date"], y=data["Net_Equity"],
+                name=MODEL_NAME_MAP[model_name], mode="lines",
+                line={"color": MODEL_COLORS[model_name], "width": 2.5},
+                hovertemplate="日期：%{x|%Y-%m-%d}<br>累積資產：%{y:.4f}<extra></extra>",
+            ))
+        st.plotly_chart(style_figure(equity_figure, "三模型 Top 5 累積資產曲線", "累積資產倍數", 630), use_container_width=True)
+
+        st.divider()
+        st.subheader("三模型回撤曲線與下行風險")
+        drawdown_figure = go.Figure()
+        for model_name in MODEL_NAME_MAP:
+            data = equity_df[equity_df["Model"] == model_name].sort_values("date")
+            drawdown_figure.add_trace(go.Scatter(
+                x=data["date"], y=data["Drawdown"],
+                name=MODEL_NAME_MAP[model_name], mode="lines",
+                line={"color": MODEL_COLORS[model_name], "width": 2.2},
+                hovertemplate="日期：%{x|%Y-%m-%d}<br>回撤：%{y:.2%}<extra></extra>",
+            ))
+        st.plotly_chart(style_figure(drawdown_figure, "三模型 Top 5 回撤曲線", "相對歷史高點跌幅", 560, True), use_container_width=True)
+
+        st.divider()
+        st.subheader("模型選擇結論")
+        xgb_class = comparison_df[comparison_df["Model"] == "XGBoost"].iloc[0]
+        rf_class = comparison_df[comparison_df["Model"] == "Random Forest"].iloc[0]
+        lr_class = comparison_df[comparison_df["Model"] == "Logistic Regression"].iloc[0]
+        xgb_port = portfolio_df[portfolio_df["Model"] == "XGBoost"].iloc[0]
+
+        st.html(f"""
+        <div class="ai-card">
+          <div class="ai-card-title">綜合判斷：正式排行榜繼續使用 XGBoost</div>
+          <div class="ai-card-text">
+            <strong>分類能力：</strong>隨機森林的五折平均 ROC-AUC 為 {rf_class['Mean_ROC_AUC']:.4f}，
+            略高於邏輯斯迴歸的 {lr_class['Mean_ROC_AUC']:.4f} 與 XGBoost 的 {xgb_class['Mean_ROC_AUC']:.4f}，
+            但三者差距很小。<br><br>
+            <strong>穩定性：</strong>XGBoost 的 ROC-AUC 標準差為 {xgb_class['Std_ROC_AUC']:.4f}，
+            是三個模型中最低，代表跨 Fold 表現相對穩定。<br><br>
+            <strong>投資組合績效：</strong>XGBoost Top 5 的累積報酬為 {xgb_port['Cumulative_Return']:.2%}、
+            Sharpe Ratio 為 {xgb_port['Sharpe_Ratio']:.3f}、最大回撤為 {xgb_port['Max_Drawdown']:.2%}，
+            在三模型 Top 5 比較中具有最佳風險調整後報酬。<br><br>
+            <strong>部署考量：</strong>XGBoost 已整合每日排行榜、SHAP 解釋與 GitHub Actions，
+            因此目前不更換正式模型。多模型結果作為公平比較與模型選擇依據。
+          </div>
+        </div>
+        """)
+
+        st.warning("多模型結果屬於歷史 OOF 模擬，不代表未來績效，也不構成投資建議。")
+
+
+render_footer()
