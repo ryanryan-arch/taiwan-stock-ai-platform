@@ -24,3 +24,9 @@ Thumbs.db
 # 暫存與紀錄檔
 *.log
 *.tmp
+# Colab model comparison temporary files
+colab_model_comparison/
+colab_resource_check.txt
+results/model_oof_predictions.parquet
+results/model_portfolio_holdings.parquet
+results/model_final_comparison.csv
