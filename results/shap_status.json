@@ -1,10 +1,10 @@
 {
   "status": "success",
-  "updated_at": "2026-08-17 02:12:02",
+  "updated_at": "2026-08-17 15:49:34",
   "stock_count": 85,
   "feature_count": 32,
   "shap_row_count": 2720,
-  "duration_seconds": 0.27,
+  "duration_seconds": 0.25,
   "model_output": "raw",
   "explanation_note": "正 SHAP 值推升 Target 1 的模型輸出，負 SHAP 值壓低 Target 1 的模型輸出。"
 }
