@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import yfinance as yf
 
 
 # ==================================================
@@ -108,6 +109,61 @@ def load_backtest_data():
         fold_file_name,
         cv_file_name,
     )
+
+
+@st.cache_data(ttl=3600)
+def load_0050_buy_and_hold(start_date, end_date):
+    """下載 0050 調整後價格並建立同期買進持有累積資產。"""
+
+    if pd.isna(start_date) or pd.isna(end_date):
+        return pd.DataFrame()
+
+    try:
+        price_df = yf.download(
+            "0050.TW",
+            start=pd.Timestamp(start_date).strftime("%Y-%m-%d"),
+            end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+        )
+    except Exception:
+        return pd.DataFrame()
+
+    if price_df is None or price_df.empty:
+        return pd.DataFrame()
+
+    if isinstance(price_df.columns, pd.MultiIndex):
+        price_df.columns = price_df.columns.get_level_values(0)
+
+    if "Close" not in price_df.columns:
+        return pd.DataFrame()
+
+    output_df = price_df.reset_index()
+    date_column = "Date" if "Date" in output_df.columns else output_df.columns[0]
+    output_df = output_df.rename(
+        columns={date_column: "date", "Close": "Adjusted_Close"}
+    )[["date", "Adjusted_Close"]]
+
+    output_df["date"] = pd.to_datetime(output_df["date"], errors="coerce")
+    output_df["Adjusted_Close"] = pd.to_numeric(
+        output_df["Adjusted_Close"], errors="coerce"
+    )
+    output_df = (
+        output_df
+        .dropna(subset=["date", "Adjusted_Close"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+    if output_df.empty or output_df.iloc[0]["Adjusted_Close"] == 0:
+        return pd.DataFrame()
+
+    output_df["Net_Equity"] = (
+        output_df["Adjusted_Close"] / output_df.iloc[0]["Adjusted_Close"]
+    )
+
+    return output_df
 
 
 # ==================================================
@@ -321,6 +377,14 @@ numeric_kpi_columns = [
 kpi_df = to_numeric_columns(kpi_df, numeric_kpi_columns)
 top5_df = prepare_date_column(top5_df)
 benchmark_df = prepare_date_column(benchmark_df)
+
+if "date" in top5_df.columns and not top5_df.empty:
+    benchmark_0050_df = load_0050_buy_and_hold(
+        top5_df["date"].min(),
+        top5_df["date"].max(),
+    )
+else:
+    benchmark_0050_df = pd.DataFrame()
 
 for dataframe in (top5_df, benchmark_df):
     if "Net_Equity" in dataframe.columns:
@@ -608,11 +672,32 @@ if "date" in benchmark_df.columns and "Net_Equity" in benchmark_df.columns:
         )
     )
 
+if (
+    not benchmark_0050_df.empty
+    and "date" in benchmark_0050_df.columns
+    and "Net_Equity" in benchmark_0050_df.columns
+):
+    equity_figure.add_trace(
+        go.Scatter(
+            x=benchmark_0050_df["date"],
+            y=benchmark_0050_df["Net_Equity"],
+            name="0050 買進持有",
+            mode="lines",
+            line={"color": "#64748b", "width": 2.5, "dash": "dot"},
+            hovertemplate=(
+                "日期：%{x|%Y-%m-%d}<br>"
+                "0050 累積資產：%{y:.4f}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+
 equity_figure.update_layout(
     height=650,
     margin={"l": 45, "r": 35, "t": 75, "b": 90},
     title={
-        "text": "AI Top 5 與股票池等權基準累積資產",
+        "text": "AI Top 5、股票池等權基準與 0050 累積資產",
         "x": 0.02,
         "font": {"size": 20, "color": "#172033"},
     },
@@ -655,9 +740,16 @@ st.info(
     "股票池等權基準不使用 AI 分數篩選，而是將每個回測日期中"
     "資料完整的同期可用股票平均配置，並計算相同五個交易日的報酬。"
     "若當期有 85 檔有效股票，每檔權重約為 1.176%。"
-    "此基準用於檢驗 AI Top 5 是否優於相同股票池的平均表現，"
-    "並非台灣加權指數或 0050。"
+    "0050 則使用同期調整後價格建立買進持有曲線，作為大型權值股市場的補充參考。"
+    "由於 0050 與 AI Top 5 的股票組成、配置方式及交易頻率不同，"
+    "0050 不取代股票池等權基準。"
 )
+
+if benchmark_0050_df.empty:
+    st.warning(
+        "目前無法取得 0050.TW 歷史價格，因此暫時不顯示 0050 曲線。"
+        "AI Top 5 與股票池等權基準仍可正常顯示。"
+    )
 
 st.divider()
 
@@ -710,11 +802,34 @@ if (
         )
     )
 
+benchmark_0050_drawdown_df = add_drawdown_column(benchmark_0050_df)
+
+if (
+    not benchmark_0050_drawdown_df.empty
+    and "date" in benchmark_0050_drawdown_df.columns
+    and "Drawdown" in benchmark_0050_drawdown_df.columns
+):
+    drawdown_figure.add_trace(
+        go.Scatter(
+            x=benchmark_0050_drawdown_df["date"],
+            y=benchmark_0050_drawdown_df["Drawdown"],
+            name="0050 買進持有",
+            mode="lines",
+            line={"color": "#64748b", "width": 2, "dash": "dot"},
+            hovertemplate=(
+                "日期：%{x|%Y-%m-%d}<br>"
+                "0050 回撤：%{y:.2%}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+
 drawdown_figure.update_layout(
     height=570,
     margin={"l": 45, "r": 35, "t": 75, "b": 90},
     title={
-        "text": "AI Top 5 與股票池等權基準回撤",
+        "text": "AI Top 5、股票池等權基準與 0050 回撤",
         "x": 0.02,
         "font": {"size": 20, "color": "#172033"},
     },
