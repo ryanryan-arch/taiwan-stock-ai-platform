@@ -38,7 +38,7 @@ render_sidebar_info()
 MODEL_NAME_MAP = {
     "Logistic Regression": "Logistic Regression（邏輯斯迴歸）",
     "Random Forest": "Random Forest（隨機森林）",
-    "XGBoost": "XGBoost（極限梯度提升）",
+    "XGBoost": "XGBoost",
 }
 
 MODEL_COLORS = {
@@ -114,46 +114,95 @@ def row_value(row, column, default=np.nan):
     return default if pd.isna(value) else float(value)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=900, show_spinner=False)
 def load_0050_buy_and_hold(start_date, end_date):
     """下載 0050 調整後價格並建立同期買進持有資產曲線。"""
+
+    empty_result = pd.DataFrame()
+
     if pd.isna(start_date) or pd.isna(end_date):
-        return pd.DataFrame()
+        return empty_result, "回測起訖日期無效"
+
+    start_text = pd.Timestamp(start_date).strftime("%Y-%m-%d")
+    end_text = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    error_messages = []
+    data = pd.DataFrame()
+
     try:
         data = yf.download(
             "0050.TW",
-            start=pd.Timestamp(start_date).strftime("%Y-%m-%d"),
-            end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-            auto_adjust=True, progress=False, threads=False,
+            start=start_text,
+            end=end_text,
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+            timeout=30,
         )
-    except Exception:
-        return pd.DataFrame()
+    except Exception as error:
+        error_messages.append(f"download: {error}")
+
     if data is None or data.empty:
-        return pd.DataFrame()
+        try:
+            data = yf.Ticker("0050.TW").history(
+                start=start_text,
+                end=end_text,
+                auto_adjust=True,
+                timeout=30,
+            )
+        except Exception as error:
+            error_messages.append(f"history: {error}")
+
+    if data is None or data.empty:
+        detail = "；".join(error_messages) if error_messages else "Yahoo Finance 回傳空資料"
+        return empty_result, detail
+
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
+
     if "Close" not in data.columns:
-        return pd.DataFrame()
+        return empty_result, "0050 歷史資料缺少 Close 欄位"
+
     output = data.reset_index()
     date_col = "Date" if "Date" in output.columns else output.columns[0]
-    output = output.rename(columns={date_col: "date", "Close": "Adjusted_Close"})
+    output = output.rename(
+        columns={date_col: "date", "Close": "Adjusted_Close"}
+    )
     output = output[["date", "Adjusted_Close"]].copy()
     output["date"] = pd.to_datetime(output["date"], errors="coerce")
-    output["Adjusted_Close"] = pd.to_numeric(output["Adjusted_Close"], errors="coerce")
-    output = output.dropna().sort_values("date").reset_index(drop=True)
-    if output.empty or output.iloc[0]["Adjusted_Close"] == 0:
-        return pd.DataFrame()
-    output["Net_Equity"] = output["Adjusted_Close"] / output.iloc[0]["Adjusted_Close"]
-    return output
+    if output["date"].dt.tz is not None:
+        output["date"] = output["date"].dt.tz_localize(None)
+    output["Adjusted_Close"] = pd.to_numeric(
+        output["Adjusted_Close"], errors="coerce"
+    )
+    output = (
+        output
+        .dropna(subset=["date", "Adjusted_Close"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+    if output.empty:
+        return empty_result, "0050 整理後沒有有效價格"
+
+    initial_price = output.iloc[0]["Adjusted_Close"]
+    if initial_price <= 0:
+        return empty_result, "0050 起始調整後價格無效"
+
+    output["Net_Equity"] = output["Adjusted_Close"] / initial_price
+    return output, ""
 
 
 # 原有 XGBoost 策略回測資料
 top5_df = prepare_date(load_csv("top5_portfolio_backtest.csv"))
 benchmark_df = prepare_date(load_csv("equal_weight_benchmark.csv"))
 if "date" in top5_df.columns and not top5_df.empty:
-    benchmark_0050_df = load_0050_buy_and_hold(top5_df["date"].min(), top5_df["date"].max())
+    benchmark_0050_df, benchmark_0050_error = load_0050_buy_and_hold(
+        top5_df["date"].min(),
+        top5_df["date"].max(),
+    )
 else:
     benchmark_0050_df = pd.DataFrame()
+    benchmark_0050_error = "AI Top 5 回測日期無效"
 kpi_df = load_csv("portfolio_kpis.csv")
 fold_df, fold_file_name = load_first_available([
     "fold_backtest_results.csv",
@@ -382,7 +431,10 @@ with xgb_tab:
                 "0050 與 AI Top 5 的配置方式及交易頻率不同，因此不取代股票池等權基準。"
             )
             if benchmark_0050_df.empty:
-                st.warning("目前無法取得 0050.TW 歷史價格，暫時不顯示 0050 曲線。")
+                st.warning(
+                    "目前無法取得 0050.TW 歷史價格，因此暫時不顯示 0050 曲線。"
+                    f"詳細原因：{benchmark_0050_error}"
+                )
             st.divider()
 
             st.subheader("策略回撤與下行風險")
