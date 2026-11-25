@@ -1,12 +1,12 @@
 {
   "status": "success",
-  "updated_at": "2026-11-24 23:40:05",
-  "price_data_date": "2026-11-24",
-  "institution_data_date": "2026-11-24",
-  "ranking_data_date_min": "2026-11-24",
-  "ranking_data_date_max": "2026-11-24",
+  "updated_at": "2026-11-25 23:18:31",
+  "price_data_date": "2026-11-25",
+  "institution_data_date": "2026-11-25",
+  "ranking_data_date_min": "2026-11-25",
+  "ranking_data_date_max": "2026-11-25",
   "stock_count": 85,
   "industry_count": 17,
-  "duration_seconds": 173.01,
+  "duration_seconds": 173.38,
   "message": "Yahoo Finance、FinMind、AI排行榜與族群排行更新成功"
 }
